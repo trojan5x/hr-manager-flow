@@ -128,6 +128,8 @@ const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef, roleData }:
                         certificateImages={certificateImages}
                         certificateNames={certificateNames}
                         certificateFullNames={certificateFullNames}
+                        userFirstName="YOUR"
+                        userLastName="NAME HERE"
                     />
                 </div>
 

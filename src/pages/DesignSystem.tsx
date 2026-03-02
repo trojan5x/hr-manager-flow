@@ -88,7 +88,7 @@ const DesignSystem = () => {
 
                 <div className="mb-8">
                     <h3 className="text-xl font-medium mb-4 text-gray-300">Certificate Fan</h3>
-                    <CertificateFan />
+                    <CertificateFan userFirstName="YOUR" userLastName="NAME HERE" />
                 </div>
             </section>
 

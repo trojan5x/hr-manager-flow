@@ -510,6 +510,8 @@ const RolePage = () => {
                                 certificateImages={roleContent?.data?.role?.skills?.map(s => s.skill_certificate_preview_image_link || s.certificate_preview_url)}
                                 certificateNames={roleContent?.data?.role?.skills?.map(s => s.certificate_name_short || s.skill_name)}
                                 certificateFullNames={roleContent?.data?.role?.skills?.map(s => s.certificate_name || s.skill_name)}
+                                userFirstName={_existingUser?.name?.split(' ')[0] || 'YOUR'}
+                                userLastName={_existingUser?.name?.split(' ').slice(1).join(' ') || 'NAME HERE'}
                                 delay={2200}
                             />
 
