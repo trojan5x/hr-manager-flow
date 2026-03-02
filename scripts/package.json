@@ -1,0 +1,15 @@
+{
+  "name": "certificate-preview-generator",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Generate preview images for role certificates",
+  "scripts": {
+    "test": "node test-certificate-setup.mjs",
+    "generate": "node generate-certificate-previews.mjs",
+    "help": "node generate-certificate-previews.mjs --help"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.39.0",
+    "node-fetch": "^3.3.2"
+  }
+}

@@ -5,23 +5,30 @@ import CertificateFan from '../CertificateFan';
 import ScorecardVisual from './ScorecardVisual';
 import RotatingText from '../RotatingText';
 import { getUserName, getCTAVariant } from '../../utils/localStorage';
+import { getCertificatesByRole } from '../../services/api';
+import type { RoleData } from '../../types';
 
-// Import certificate images
-import chrp from '../../assets/certificateImages/CHRPx.png';
-import shrbp from '../../assets/certificateImages/SHRBPx.png';
-import pmhr from '../../assets/certificateImages/PMHRx.png';
-import pas from '../../assets/certificateImages/PASx.png';
-import aiInHr from '../../assets/certificateImages/ai-in-hr.png';
+// Import certificate images as fallbacks - Use public paths for proper serving
+const fallbackCertificateImages = [
+    "/assets/certificateImages/CHRPx.png",
+    "/assets/certificateImages/SHRBPx.png", 
+    "/assets/certificateImages/PMHRx.png",
+    "/assets/certificateImages/PASx.png",
+    "/assets/certificateImages/ai-in-hr.png"
+];
 import { Clock, TrendingUp, Globe } from 'lucide-react';
 
 interface HeroSectionProps {
     onBeginAssessment: () => void;
     isLoading?: boolean;
     ctaRef?: React.Ref<HTMLButtonElement>;
+    roleData: RoleData | null;
 }
 
-const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef }: HeroSectionProps) => {
+const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef, roleData }: HeroSectionProps) => {
     const [userName, setUserName] = useState<string | undefined>(undefined);
+    const [certificates, setCertificates] = useState<any[]>([]);
+    const [, setCertificatesLoading] = useState(true);
     const ctaVariant = getCTAVariant();
 
     useEffect(() => {
@@ -34,15 +41,38 @@ const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef }: HeroSecti
         }
     }, []);
 
-    const certificateImages = [
-        chrp,
-        shrbp,
-        pmhr,
-        pas,
-        aiInHr
-    ];
+    // Fetch certificates when roleData is available
+    useEffect(() => {
+        const fetchCertificates = async () => {
+            if (!roleData?.id) {
+                console.log('No roleData.id, using fallback certificates');
+                setCertificatesLoading(false);
+                return;
+            }
 
-    const certificateNames = [
+            try {
+                setCertificatesLoading(true);
+                const response = await getCertificatesByRole(roleData.id);
+                if (response.result === 'success' && response.data) {
+                    console.log('✅ Fetched role certificates:', response.data.length, 'certificates');
+                    setCertificates(response.data);
+                } else {
+                    console.log('No certificates in response, using fallback');
+                }
+            } catch (error) {
+                console.error('Failed to fetch role certificates:', error);
+            } finally {
+                setCertificatesLoading(false);
+            }
+        };
+
+        fetchCertificates();
+    }, [roleData?.id]);
+
+    // Fallback certificate data (kept as backup)
+    // Already defined above as fallbackCertificateImages
+
+    const fallbackCertificateNames = [
         "CHRPx",
         "SHRBPx",
         "PMHRx",
@@ -50,17 +80,45 @@ const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef }: HeroSecti
         "AI in HR"
     ];
 
+    // Use database certificates if available, otherwise use fallback
+    const certificateImages = certificates.length > 0 
+        ? certificates.map((cert, index) => {
+            // Use database URL if available, otherwise fallback to static image
+            return cert.preview_image || fallbackCertificateImages[index % fallbackCertificateImages.length];
+        })
+        : fallbackCertificateImages;
+
+    console.log('📋 Using certificate images:', certificates.length > 0 ? 'Database URLs' : 'Fallback images');
+
+    const certificateNames = certificates.length > 0
+        ? certificates.map(cert => cert.short_name || cert.name)
+        : fallbackCertificateNames;
+
+    const certificateFullNames = certificates.length > 0
+        ? certificates.map(cert => cert.certificate_name || cert.name)
+        : fallbackCertificateNames;
+
+    const displayRoleName = roleData?.core_skill || "Your Profession";
+
+    // Default to the static frameworks if none are in the DB or loading
+    const rawFrameworks = roleData?.frameworks?.length ? roleData.frameworks : ["CHRPx", "SHRBPx", "PMHRx"];
+
+    // Safely format the frameworks into a readable string (e.g. "CHRPx, SHRBPx, and PMHRx")
+    const formattedFrameworks = rawFrameworks.length > 1
+        ? `${rawFrameworks.slice(0, -1).join(', ')}, and ${rawFrameworks[rawFrameworks.length - 1]}`
+        : rawFrameworks[0] || "";
+
     return (
         <section className="relative w-full px-4 md:px-6 lg:px-8 pt-2 pb-12 lg:pt-4 lg:pb-20 max-w-7xl mx-auto flex flex-col items-center">
             {/* Main Content */}
             <div className="flex flex-col items-center lg:items-center text-center w-full max-w-4xl z-10">
 
                 <h1 className="text-3xl min-[375px]:text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-none mb-3">
-                    {userName && <>{userName}, </>}Turn Your HR Management Experience Into <span className="text-[#98D048]">Global Recognition</span>
+                    {userName && <>{userName}, </>}Turn Your {displayRoleName} Experience Into <span className="text-[#98D048]">Global Recognition</span>
                 </h1>
 
                 <p className="text-sm md:text-lg text-white/80 mb-3 max-w-xl leading-normal">
-                    Get assessed against Global Frameworks like <span className="text-[#98D048] font-bold">CHRPx, SHRBPx, and PMHRx</span> and unlock top opportunities.
+                    Get assessed against Global Frameworks like <span className="text-[#98D048] font-bold">{formattedFrameworks}</span> and unlock top opportunities.
                 </p>
 
                 <div className="w-full flex justify-center mt-3 mb-8">
@@ -69,6 +127,7 @@ const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef }: HeroSecti
                         delay={500}
                         certificateImages={certificateImages}
                         certificateNames={certificateNames}
+                        certificateFullNames={certificateFullNames}
                     />
                 </div>
 
@@ -145,7 +204,7 @@ const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef }: HeroSecti
                         {/* Sample Report Preview */}
                         <div className="max-w-md mx-auto mt-10">
                             <p className="text-white/50 text-xs text-center mb-1 uppercase tracking-wider font-medium">Preview Your Results</p>
-                            <ScorecardVisual className="transform scale-95 md:scale-100" />
+                            <ScorecardVisual className="transform scale-95 md:scale-100" roleData={roleData} />
                         </div>
                     </div>
                 </div>

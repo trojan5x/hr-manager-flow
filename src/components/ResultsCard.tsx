@@ -168,14 +168,23 @@ const ResultsCard: React.FC<ResultsCardProps> = ({
     const getAISummary = () => {
         if (aiSummary) return aiSummary;
         if (isPassed) {
-
-            const bestPhase = currentBreakdown.reduce((prev, current) => (prev.score > current.score) ? prev : current);
             const greeting = userName ? `Congratulations ${userName}` : "Congratulations";
-            return `${greeting} on achieving certification! Your assessment demonstrates strong competency in ${role.toLowerCase()} skills with an overall score of ${score}%. You excelled particularly in ${bestPhase.phase} (${bestPhase.score}%) and showed solid understanding across all key areas. Your certification validates your expertise and readiness for professional challenges in this domain.`;
+            
+            if (currentBreakdown && currentBreakdown.length > 0) {
+                const bestPhase = currentBreakdown.reduce((prev, current) => (prev.score > current.score) ? prev : current);
+                return `${greeting} on achieving certification! Your assessment demonstrates strong competency in ${role.toLowerCase()} skills with an overall score of ${score}%. You excelled particularly in ${bestPhase.phase} (${bestPhase.score}%) and showed solid understanding across all key areas. Your certification validates your expertise and readiness for professional challenges in this domain.`;
+            } else {
+                return `${greeting} on achieving certification! Your assessment demonstrates strong competency in ${role.toLowerCase()} skills with an overall score of ${score}%. Your certification validates your expertise and readiness for professional challenges in this domain.`;
+            }
         } else {
-            const bestPhase = currentBreakdown.reduce((prev, current) => (prev.score > current.score) ? prev : current);
             const greeting = userName ? `While you didn't meet the 50% threshold for certification this time, ${userName}` : "While you didn't meet the 50% threshold for certification this time";
-            return `${greeting}, your assessment reveals important insights. You showed particular strength in ${bestPhase.phase} (${bestPhase.score}%). Focus on improving in areas where you scored below 50% and consider additional study in practical applications before retaking the assessment.`;
+            
+            if (currentBreakdown && currentBreakdown.length > 0) {
+                const bestPhase = currentBreakdown.reduce((prev, current) => (prev.score > current.score) ? prev : current);
+                return `${greeting}, your assessment reveals important insights. You showed particular strength in ${bestPhase.phase} (${bestPhase.score}%). Focus on improving in areas where you scored below 50% and consider additional study in practical applications before retaking the assessment.`;
+            } else {
+                return `${greeting}, your assessment reveals important insights. Focus on reviewing the core concepts and consider additional study in practical applications before retaking the assessment.`;
+            }
         }
     };
 

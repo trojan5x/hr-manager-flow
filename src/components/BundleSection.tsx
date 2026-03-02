@@ -304,8 +304,8 @@ const BundleSection: React.FC<BundleSectionProps> = ({
 
                                                     {/* Price Display - Order: Badge → Strikethrough → Actual Price */}
                                                     <div className="flex flex-wrap items-center gap-2 mt-1.5">
-                                                        {/* RECOMMENDED Badge for CDAPx I and II (101, 102) with thumbs up icon */}
-                                                        {(cert.skill_id === 101 || cert.skill_id === 102) && (
+                                                        {/* RECOMMENDED Badge for default type certificates */}
+                                                        {(cert as any).type === 'default' && (
                                                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-yellow-400 bg-yellow-400/10 border border-yellow-400/20 flex items-center gap-1">
                                                                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                                                     <path d="M2 10.5a1.5 1.5 0 113 0v6a1.5 1.5 0 01-3 0v-6zM6 10.333v5.43a2 2 0 001.106 1.79l.05.025A4 4 0 008.943 18h5.416a2 2 0 001.962-1.608l1.2-6A2 2 0 0015.56 8H12V4a2 2 0 00-2-2 1 1 0 00-1 1v.667a4 4 0 01-.8 2.4L6.8 7.933a4 4 0 00-.8 2.4z" />
@@ -314,8 +314,8 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                             </span>
                                                         )}
 
-                                                        {/* 50% OFF Badge for CBAPx and PMPx (103, 104) with tag icon */}
-                                                        {(cert.skill_id === 103 || cert.skill_id === 104) && (
+                                                        {/* 50% OFF Badge for secondary type certificates */}
+                                                        {(cert as any).type === 'secondary' && (
                                                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-orange-400 bg-orange-400/10 border border-orange-400/20 flex items-center gap-1">
                                                                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                                                     <path fillRule="evenodd" d="M17.707 9.293a1 1 0 010 1.414l-7 7a1 1 0 01-1.414 0l-7-7A.997.997 0 012 10V5a3 3 0 013-3h5c.256 0 .512.098.707.293l7 7zM5 6a1 1 0 100-2 1 1 0 000 2z" clipRule="evenodd" />
@@ -324,8 +324,18 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                             </span>
                                                         )}
 
-                                                        {/* Other badges from API - show chart up icon for "popular" or similar */}
-                                                        {cert.badge && cert.skill_id !== 101 && cert.skill_id !== 102 && cert.skill_id !== 103 && cert.skill_id !== 104 && (
+                                                        {/* POPULAR Badge for AI type certificates */}
+                                                        {(cert as any).type === 'ai' && (
+                                                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-purple-400 bg-purple-400/10 border border-purple-400/20 flex items-center gap-1">
+                                                                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" />
+                                                                </svg>
+                                                                POPULAR
+                                                            </span>
+                                                        )}
+
+                                                        {/* Other badges from API or fallback for certificates without type */}
+                                                        {cert.badge && !(cert as any).type && (
                                                             <span className="text-[10px] font-bold px-1.5 py-0.5 rounded text-purple-400 bg-purple-400/10 border border-purple-400/20 flex items-center gap-1">
                                                                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                                                                     <path fillRule="evenodd" d="M12 7a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0V8.414l-4.293 4.293a1 1 0 01-1.414 0L8 10.414l-4.293 4.293a1 1 0 01-1.414-1.414l5-5a1 1 0 011.414 0L11 10.586 14.586 7H12z" clipRule="evenodd" />
@@ -334,16 +344,12 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                             </span>
                                                         )}
 
-                                                        {/* Original Price (Strikethrough) - Show for CDAPx I, II (101, 102) */}
-                                                        {(cert.skill_id === 101 || cert.skill_id === 102) ? (
+                                                        {/* Original Price (Strikethrough) - Based on certificate type */}
+                                                        {(cert as any).type === 'default' ? (
                                                             <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
                                                                 ₹4,999
                                                             </span>
-                                                        ) : (cert.skill_id === 103 || cert.skill_id === 104) ? (
-                                                            <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
-                                                                ₹1,999
-                                                            </span>
-                                                        ) : (cert.skill_id === 105) ? (
+                                                        ) : ((cert as any).type === 'secondary' || (cert as any).type === 'ai') ? (
                                                             <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
                                                                 ₹1,999
                                                             </span>
@@ -353,13 +359,13 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                             </span>
                                                         )}
 
-                                                        {/* Current Price */}
+                                                        {/* Current Price - Based on certificate type */}
                                                         <span className={`text-xs font-bold ${selectedIds.includes(cert.skill_id) ? 'text-white' : 'text-gray-300'}`}>
                                                             ₹{
-                                                                cert.skill_id === 101 || cert.skill_id === 102 ? 1999 :
-                                                                    cert.skill_id === 103 || cert.skill_id === 104 ? 999 :
-                                                                        cert.skill_id === 105 ? 999 :
-                                                                            cert.price || 999
+                                                                (cert as any).type === 'default' ? 1999 :               // Default certificates - ₹1999
+                                                                    (cert as any).type === 'secondary' ? 999 :           // Secondary certificates - ₹999
+                                                                        (cert as any).type === 'ai' ? 999 :              // AI certificates - ₹999
+                                                                            cert.price || 999                   // Fallback price
                                                             }
                                                         </span>
                                                     </div>
@@ -393,12 +399,24 @@ const BundleSection: React.FC<BundleSectionProps> = ({
 
                                 {/* Unlock Message - Moved above bonus items */}
                                 {(() => {
-                                    const nonAICertCount = selectedIds.filter(id => id !== 105).length;
-                                    const hasAICert = selectedIds.includes(105);
-                                    const onlyBasicCerts = selectedIds.filter(id => id !== 105).every(id => id === 101 || id === 102) && nonAICertCount > 0;
-                                    const basicCertsWithAI = onlyBasicCerts && hasAICert;
+                                    const nonAICertCount = selectedIds.filter(id => {
+                                        const cert = certifications.find(c => c.skill_id === id);
+                                        return cert && (cert as any).type !== 'ai';
+                                    }).length;
+                                    const hasAICert = selectedIds.some(id => {
+                                        const cert = certifications.find(c => c.skill_id === id);
+                                        return cert && (cert as any).type === 'ai';
+                                    });
+                                    const onlyDefaultCerts = selectedIds.filter(id => {
+                                        const cert = certifications.find(c => c.skill_id === id);
+                                        return cert && (cert as any).type !== 'ai';
+                                    }).every(id => {
+                                        const cert = certifications.find(c => c.skill_id === id);
+                                        return cert && (cert as any).type === 'default';
+                                    }) && nonAICertCount > 0;
+                                    const defaultCertsWithAI = onlyDefaultCerts && hasAICert;
 
-                                    if (basicCertsWithAI) {
+                                    if (defaultCertsWithAI) {
                                         return (
                                             <p className="text-xs sm:text-sm text-yellow-400 font-semibold mb-3 flex items-center gap-1.5">
                                                 <svg className="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
@@ -407,7 +425,7 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                 Select 1 more certification to unlock all bonuses
                                             </p>
                                         );
-                                    } else if (onlyBasicCerts) {
+                                    } else if (onlyDefaultCerts) {
                                         return (
                                             <p className="text-xs sm:text-sm text-yellow-400 font-semibold mb-3 flex items-center gap-1.5">
                                                 <svg className="w-4 h-4 text-yellow-500" fill="currentColor" viewBox="0 0 20 20">
@@ -431,7 +449,7 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                 <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
                                                     <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
                                                 </svg>
-                                                All bonuses unlocked! Worth ₹{selectedIds.includes(105) ? '6,596' : '4,597'} FREE
+                                                All bonuses unlocked! Worth ₹{hasAICert ? '6,596' : '4,597'} FREE
                                             </p>
                                         );
                                     }
@@ -440,20 +458,31 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                 <div className="grid grid-cols-1 gap-2.5">
                                     {(() => {
                                         // Calculate which bonuses are unlocked
-                                        // Count non-AI certificates (assuming AI cert has a specific skill_id - adjust if needed)
-                                        const nonAICertCount = selectedIds.filter(id => id !== 105).length; // Adjust 105 to actual AI cert ID
-                                        const hasAICert = selectedIds.includes(105); // Adjust 105 to actual AI cert ID
+                                        const nonAICertCount = selectedIds.filter(id => {
+                                            const cert = certifications.find(c => c.skill_id === id);
+                                            return cert && (cert as any).type !== 'ai';
+                                        }).length;
+                                        const hasAICert = selectedIds.some(id => {
+                                            const cert = certifications.find(c => c.skill_id === id);
+                                            return cert && (cert as any).type === 'ai';
+                                        });
 
-                                        // If user selects only basic certs (101) and/or (102) (excluding AI), only 1 bonus is active
-                                        const onlyBasicCerts = selectedIds.filter(id => id !== 105).every(id => id === 101 || id === 102) && nonAICertCount > 0;
+                                        // If user selects only default certs (excluding AI), only 1 bonus is active
+                                        const onlyDefaultCerts = selectedIds.filter(id => {
+                                            const cert = certifications.find(c => c.skill_id === id);
+                                            return cert && (cert as any).type !== 'ai';
+                                        }).every(id => {
+                                            const cert = certifications.find(c => c.skill_id === id);
+                                            return cert && (cert as any).type === 'default';
+                                        }) && nonAICertCount > 0;
 
-                                        // Special case: If basic certs + AI selected, unlock data analytics course + AI course (2 bonuses)
-                                        const basicCertsWithAI = onlyBasicCerts && hasAICert;
+                                        // Special case: If default certs + AI selected, unlock data analytics course + AI course (2 bonuses)
+                                        const defaultCertsWithAI = onlyDefaultCerts && hasAICert;
 
                                         let activeBonusCount = 0;
-                                        if (basicCertsWithAI) {
+                                        if (defaultCertsWithAI) {
                                             activeBonusCount = 2; // Data Analytics course + AI course
-                                        } else if (onlyBasicCerts) {
+                                        } else if (onlyDefaultCerts) {
                                             activeBonusCount = 1; // Only Data Analytics course
                                         } else if (nonAICertCount >= 3) {
                                             activeBonusCount = 4; // All bonuses
@@ -620,18 +649,30 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                     {/* Free Bonuses Summary */}
                                     <div className="flex items-center gap-1.5 mt-3">
                                         {(() => {
-                                            const nonAICertCount = selectedIds.filter(id => id !== 105).length;
-                                            const hasAICert = selectedIds.includes(105);
-                                            const onlyBasicCerts = selectedIds.filter(id => id !== 105).every(id => id === 101 || id === 102) && nonAICertCount > 0;
-                                            const basicCertsWithAI = onlyBasicCerts && hasAICert;
+                                            const nonAICertCount = selectedIds.filter(id => {
+                                                const cert = certifications.find(c => c.skill_id === id);
+                                                return cert && (cert as any).type !== 'ai';
+                                            }).length;
+                                            const hasAICert = selectedIds.some(id => {
+                                                const cert = certifications.find(c => c.skill_id === id);
+                                                return cert && (cert as any).type === 'ai';
+                                            });
+                                            const onlyDefaultCerts = selectedIds.filter(id => {
+                                                const cert = certifications.find(c => c.skill_id === id);
+                                                return cert && (cert as any).type !== 'ai';
+                                            }).every(id => {
+                                                const cert = certifications.find(c => c.skill_id === id);
+                                                return cert && (cert as any).type === 'default';
+                                            }) && nonAICertCount > 0;
+                                            const defaultCertsWithAI = onlyDefaultCerts && hasAICert;
 
                                             let unlockedBonusCount = 0;
                                             let totalBonusValue = 0;
 
-                                            if (basicCertsWithAI) {
+                                            if (defaultCertsWithAI) {
                                                 unlockedBonusCount = 2;
                                                 totalBonusValue = 2999 + 1999; // Data Analytics Course + AI Course
-                                            } else if (onlyBasicCerts) {
+                                            } else if (onlyDefaultCerts) {
                                                 unlockedBonusCount = 1;
                                                 totalBonusValue = 2999; // Data Analytics Course only
                                             } else if (nonAICertCount >= 3) {

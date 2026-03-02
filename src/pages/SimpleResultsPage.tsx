@@ -66,6 +66,17 @@ const SimpleResultsPage = () => {
 
     // Track results page view
     useEffect(() => {
+        // Register session if available
+        const currentSessionId = getStoredSessionId();
+        if (currentSessionId) {
+            analytics.register({ session_id: currentSessionId });
+            analytics.setSessionId(currentSessionId);
+            
+            if (import.meta.env.DEV) {
+                console.log('[SimpleResultsPage] 📝 Registered session with analytics:', currentSessionId.slice(0, 8) + '...');
+            }
+        }
+        
         if (!isLoading && score !== null) {
             analytics.track('view_results_simplified', {
                 score,

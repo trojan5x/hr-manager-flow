@@ -114,6 +114,32 @@ const AdminDashboard = () => {
                 </div>
             </TopBar>
 
+            {/* Navigation Tabs */}
+            <div className="border-b border-white/10">
+                <div className="max-w-7xl mx-auto px-4">
+                    <nav className="flex space-x-8">
+                        <a
+                            href="/admin/certificates"
+                            className="py-4 px-1 border-b-2 border-[#98D048] font-medium text-sm text-[#98D048]"
+                        >
+                            Certificates
+                        </a>
+                        <a
+                            href="/admin/role-generator"
+                            className="py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-300 hover:text-white hover:border-gray-300 transition-colors"
+                        >
+                            Role Generator
+                        </a>
+                        <a
+                            href="/admin/dashboard"
+                            className="py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-300 hover:text-white hover:border-gray-300 transition-colors"
+                        >
+                            Analytics
+                        </a>
+                    </nav>
+                </div>
+            </div>
+
             <div className="max-w-7xl mx-auto px-4 py-8">
                 {/* Payment Analytics Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">

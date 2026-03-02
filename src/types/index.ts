@@ -100,6 +100,19 @@ export interface RoleContentResponse {
   };
 }
 
+export interface RoleData {
+  id: number;
+  role_name: string;
+  description: string;
+  core_skill: string;
+  frameworks: string[];
+  scorecard_stats?: Array<{
+    skill: string;
+    percentage: number;
+  }>;
+}
+
+
 // API Response for generating status (202)
 export interface RoleGeneratingResponse {
   success: boolean;
@@ -298,6 +311,7 @@ export interface DeliverableItem {
 }
 export interface CertificationItem {
   skill_id: number;
+  role_id?: number;      // ✨ NEW: Role ID for tracking
   certification_name: string;
   certification_name_short: string;
   skill_description: string;
@@ -306,12 +320,19 @@ export interface CertificationItem {
   price?: number;        // ✨ NEW
   original_price?: number; // ✨ NEW
   badge?: string;
+  type?: string;         // ✨ NEW: Certificate type (default, secondary, ai)
+  cert_id_prefix?: string;
+  order_index?: number;
+  description?: string;
+  skill_frameworks?: string[];
 }
 
 export interface BundleProductData {
   bundle_name: string;
   certifications: CertificationItem[];
-  product_cost: number;
+  product_cost?: number;  // Made optional since it's calculated dynamically
+  bundle_price?: number;  // ✨ NEW: Dynamic bundle price
+  bundle_original_price?: number; // ✨ NEW: Dynamic original price
 }
 
 export interface BundleProductResponse {
@@ -380,4 +401,76 @@ export interface CertificateRecord {
   status: 'pending' | 'generated';
   metadata?: any;
   created_at: string;
+}
+
+// ✨ NEW: User Certificate Types for New System
+export interface UserCertificate {
+  id: string; // UUID
+  user_id: number;
+  role_id: number;
+  role_certificate_id: number;
+  certificate_image_url?: string;
+  certificate_id: string; // Format: CERT-{DB-ID}-{timestamp}
+  issued_at: string;
+  status: 'pending' | 'generated' | 'failed';
+  metadata?: any;
+  created_at: string;
+}
+
+export interface GenerateCertificateRequest {
+  session_id: string;
+  order_id: string;
+}
+
+export interface GenerateCertificateResult {
+  certificate_id: string;
+  status: 'pending' | 'generated' | 'failed';
+  image_url?: string;
+  error?: string;
+}
+
+export interface GenerateCertificateResponse {
+  success: boolean;
+  certificates_generated: number;
+  certificates: GenerateCertificateResult[];
+}
+
+// ✨ NEW: Webhook Processing Types
+export interface WebhookProcessingRequest {
+  session_id: string;
+  order_id: string;
+  user_id?: number;
+}
+
+export interface WebhookCertificateResult {
+  certificate_id: string;
+  status: 'created' | 'existing' | 'failed';
+  error?: string;
+}
+
+export interface WebhookProcessingResponse {
+  success: boolean;
+  certificates_created: number;
+  certificates: WebhookCertificateResult[];
+}
+
+// ✨ NEW: Image Generation Types
+export interface ImageGenerationRequest {
+  session_id: string;
+}
+
+export interface ImageGenerationResult {
+  certificate_id: string;
+  status: 'generated' | 'up_to_date' | 'failed';
+  image_url?: string;
+  expires_at?: string;
+  error?: string;
+}
+
+export interface ImageGenerationResponse {
+  success: boolean;
+  certificates_processed: number;
+  certificates_generated: number;
+  certificates_up_to_date: number;
+  certificates: ImageGenerationResult[];
 }

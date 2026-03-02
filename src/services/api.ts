@@ -17,13 +17,60 @@ import type {
   CreateOrderResponse,
   CertifiedUserData,
   CertificateRecord,
+  RoleData,
   DeliverableItem
 } from '../types';
 export type { CertificationItem, BundleProductData } from '../types';
 import { HR_MANAGER_ROLE, MOCK_ASSESSMENT, MOCK_BUNDLE_PRODUCTS } from '../data/staticData';
-
-
 // =============================================================================
+// =============================================================================
+
+/**
+ * Fetch Role Details for Landing Page - REAL API
+ */
+export const getRoleDetails = async (roleName: string): Promise<RoleData | null> => {
+  console.log(`API: Fetching role details for ${roleName}`);
+  
+  try {
+    const { data, error } = await supabase
+      .from('roles')
+      .select('id, role_name, description, core_skill, frameworks, role_landing_pages(content)')
+      .eq('role_name', roleName)
+      .eq('status', 'published')
+      .single();
+
+    if (error) {
+      console.warn(`Error fetching details for role ${roleName}:`, error);
+      return null;
+    }
+
+    let scorecard_stats = undefined;
+    if (data.role_landing_pages && Array.isArray(data.role_landing_pages) && data.role_landing_pages.length > 0) {
+        const content = data.role_landing_pages[0].content;
+        if (content && content.scorecard_stats) {
+            scorecard_stats = content.scorecard_stats;
+        }
+    } else if (data.role_landing_pages && !Array.isArray(data.role_landing_pages)) {
+        const content = (data.role_landing_pages as any).content;
+        if (content && content.scorecard_stats) {
+            scorecard_stats = content.scorecard_stats;
+        }
+    }
+
+    return {
+      id: data.id,
+      role_name: data.role_name,
+      description: data.description,
+      core_skill: data.core_skill,
+      frameworks: data.frameworks,
+      scorecard_stats
+    } as RoleData;
+  } catch (error) {
+    console.error('Exception fetching role details:', error);
+    return null;
+  }
+};
+
 // STATIC API IMPLEMENTATION
 // =============================================================================
 
@@ -69,79 +116,143 @@ export const checkCertifiedUser = async (email: string): Promise<CertifiedUserDa
 };
 
 /**
- * Signup user - MOCK
+ * Signup user - REAL API (Supabase)
  */
-export const signupUser = async (signupData: any): Promise<any> => {
-  console.log('STATIC: Signing up user', signupData);
-  return {
-    result: 'success',
-    message: 'User signed up',
-    data: { id: 123, created_at: Date.now() }
-  };
+export const signupUser = async (signupData: {
+    name: string;
+    email: string;
+    phone?: string;
+    role?: string;
+}): Promise<any> => {
+    console.log('API: Signing up user', signupData);
+    
+    try {
+        const { data, error } = await supabase
+            .from('users')
+            .upsert({
+                name: signupData.name,
+                email: signupData.email,
+                phone_number: signupData.phone,
+                last_login_at: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+            }, { 
+                onConflict: 'email' 
+            })
+            .select()
+            .single();
+
+        if (error) {
+            console.error('Signup error:', error);
+            throw error;
+        }
+
+        return {
+            result: 'success',
+            message: 'User signed up',
+            data: data
+        };
+    } catch (error) {
+        console.error('Error in signupUser:', error);
+        throw error;
+    }
 };
 
 /**
- * Search for roles - MOCK
+ * Search for roles - REAL API (Supabase)
  */
 export const searchRoles = async (query: string, limit: number = 10): Promise<string[]> => {
-  console.log(`STATIC: Searching roles for "${query}"`);
-  const roles = ['HR Manager', 'Talent Acquisition Specialist', 'HR Business Partner', 'People Operations Manager'];
-  return roles.filter(r => r.toLowerCase().includes(query.toLowerCase())).slice(0, limit);
+  console.log(`API: Searching roles for "${query}"`);
+  try {
+    let supabaseQuery = supabase
+      .from('roles')
+      .select('role_name')
+      .eq('status', 'published')
+      .limit(limit);
+
+    if (query) {
+      supabaseQuery = supabaseQuery.ilike('role_name', `%${query}%`);
+    }
+
+    const { data, error } = await supabaseQuery;
+
+    if (error) {
+        console.warn('Role search Supabase query failed', error);
+        return [];
+    }
+
+    // Handle when returning an empty array.
+    if (!data) return [];
+    
+    // Map them to just the role names strings.
+    return data.map((item: any) => item.role_name);
+  } catch (error) {
+    console.error('Error searching roles:', error);
+    return [];
+  }
 };
 
 import { supabase } from './supabaseClient';
 
 /**
- * Create a new user session - REAL (Supabase)
+ * Create a new user session - REAL API
  */
 export const createSession = async (
   role: string,
   utmParams?: UrlParamsData,
   retries: number = 3
 ): Promise<SessionResponse> => {
-  console.log('API: Creating session in Supabase', { role, utmParams });
+  console.log('API: Creating session via Supabase', { role, utmParams });
   
   let attempt = 0;
   
   while (attempt < retries) {
       try {
-          // Prepare data for insertion
-          const sessionData = {
+          // Map UTM params to individual columns if they exist
+          const sessionData: any = {
               role: role,
-              utm_source: utmParams?.utm_source || null,
-              utm_medium: utmParams?.utm_medium || null,
-              utm_campaign: utmParams?.utm_campaign || null,
-              user_agent: navigator.userAgent
+              user_agent: navigator.userAgent,
           };
+
+          if (utmParams?.utm_source) sessionData.utm_source = utmParams.utm_source;
+          if (utmParams?.utm_medium) sessionData.utm_medium = utmParams.utm_medium;
+          if (utmParams?.utm_campaign) sessionData.utm_campaign = utmParams.utm_campaign;
+          if (utmParams?.utm_content) sessionData.utm_content = utmParams.utm_content;
+          if (utmParams?.utm_term) sessionData.utm_term = utmParams.utm_term;
 
           const { data, error } = await supabase
               .from('sessions')
-              .insert(sessionData)
-              .select()
+              .insert([sessionData])
+              .select('id, created_at')
               .single();
 
-          if (error) {
+          if (error || !data) {
               console.warn(`Supabase session creation error (Attempt ${attempt + 1}):`, error);
-              throw error;
+              throw new Error(`DB error! ${error?.message || 'Unknown error'}`);
           }
 
-          if (!data) {
-              throw new Error('No data returned from session creation');
+          // Sessions table uses bigint auto-increment IDs, convert to string
+          const sessionId = data.id.toString();
+          
+          if (import.meta.env.DEV) {
+              console.log('[API] ✅ Session created successfully:', {
+                  sessionId: sessionId,
+                  type: 'bigint',
+                  created_at: data.created_at
+              });
           }
 
           return {
-            session_id: data.session_id,
+            session_id: sessionId,
             role: role,
             created_at: data.created_at
           };
           
       } catch (error) {
           attempt++;
-          console.error(`Failed to create session in Supabase (Attempt ${attempt}/${retries})`);
+          console.error(`Failed to create session via DB (Attempt ${attempt}/${retries})`, error);
           
           if (attempt >= retries) {
                console.error('Critical: All session creation attempts failed.');
-               // THROW ERROR - Do not use fallback. Stop the flow.
                throw new Error('Failed to initialize session. Please check your connection and refresh.');
           }
           // Wait before retry (exponential backoff: 500ms, 1000ms, 2000ms)
@@ -157,21 +268,14 @@ export const createSession = async (
  */
 export const updateSessionUser = async (
     sessionId: string | number,
-    userId: number | string,
-    email?: string
+    userId: number | string
 ): Promise<boolean> => {
     console.log(`API: Linking Session ${sessionId} to User ${userId}`);
     try {
-        const updates: any = {
-            user_id: userId
-        };
-        // If email column exists in sessions, we can update it too, but user_id is key
-        if (email) updates.user_email = email; // Optional, assuming column might exist or just for log
-
         const { error } = await supabase
             .from('sessions')
-            .update(updates)
-            .eq('session_id', sessionId);
+            .update({ user_id: userId })
+            .eq('id', sessionId);
 
         if (error) {
             console.error('Failed to link user to session:', error);
@@ -181,6 +285,55 @@ export const updateSessionUser = async (
     } catch (e) {
         console.error('Error in updateSessionUser:', e);
         return false;
+    }
+};
+
+/**
+ * Fetch Session Details - REAL (Supabase)
+ */
+export const getSessionDetails = async (sessionId: string | number): Promise<{ role: string } | null> => {
+    console.log(`API: Fetching details for Session ${sessionId}`);
+    try {
+        const { data, error } = await supabase
+            .from('sessions')
+            .select('role')
+            .eq('id', sessionId)
+            .single();
+
+        if (error || !data) {
+            console.error('Failed to fetch session details:', error);
+            return null;
+        }
+        return data;
+    } catch (e) {
+        console.error('Error in getSessionDetails:', e);
+        return null;
+    }
+};
+
+/**
+ * Get dynamic community size for a role - REAL (Supabase)
+ */
+export const getRoleCommunitySize = async (roleName: string): Promise<number> => {
+    console.log(`API: Fetching community size for ${roleName}`);
+    try {
+        const { count, error } = await supabase
+            .from('sessions')
+            .select('*', { count: 'exact', head: true })
+            .eq('role', roleName);
+
+        if (error) {
+            console.error('Failed to fetch role community count:', error);
+            return 2847; // Fallback to hardcoded default
+        }
+
+        // Return a base offset + real session count
+        // Using a high base number to make the community look established
+        const baseOffset = 2840;
+        return baseOffset + (count || 0);
+    } catch (e) {
+        console.error('Error in getRoleCommunitySize:', e);
+        return 2847;
     }
 };
 
@@ -222,15 +375,143 @@ export const generateContent = async (_prompt: string): Promise<string> => {
 };
 
 /**
- * Fetch bundle with scenarios - MOCK
+ * Fetch bundle with scenarios - REAL API (Supabase)
  */
 export const fetchBundleScenarios = async (
-  bundleId: string | number,
+  sessionId: string | number,
   _waitForUpdates: boolean = false,
   _timeoutSeconds: number = 30
 ): Promise<ScenariosResponse> => {
-  console.log(`STATIC: Fetching scenarios for bundle ${bundleId}`);
-  return MOCK_ASSESSMENT;
+  console.log(`API: Fetching scenarios for session ${sessionId}`);
+
+  try {
+    // 1. Fetch Session to get the Role
+    const { data: sessionData, error: sessionError } = await supabase
+      .from('sessions')
+      .select('role')
+      .eq('id', sessionId)
+      .single();
+
+    if (sessionError || !sessionData) {
+      console.error('Error fetching session:', sessionError);
+      return { success: false, message: 'Session not found', data: null as any };
+    }
+
+    const sessionRoleName = sessionData.role;
+
+    // 2. Fetch the Role ID
+    const { data: roleData, error: roleError } = await supabase
+      .from('roles')
+      .select('id, role_name')
+      .eq('role_name', sessionRoleName)
+      .single();
+
+    if (roleError || !roleData) {
+      console.error('Error fetching role:', roleError);
+      return { success: false, message: 'Role not found', data: null as any };
+    }
+
+    // 3. Fetch the Assessment for this Role
+    const { data: assessmentData, error: assessmentError } = await supabase
+      .from('assessments')
+      .select('id')
+      .eq('role_id', roleData.id)
+      .eq('status', 'published')
+      .single();
+
+    if (assessmentError || !assessmentData) {
+      console.error('Error fetching assessment:', assessmentError);
+      return { success: false, message: 'Assessment not found', data: null as any };
+    }
+
+    // 4. Fetch the Assessment Phases, Scenarios, and Questions
+    // Using a joined query to get the whole tree
+    const { data: phasesData, error: phasesError } = await supabase
+      .from('assessment_phases')
+      .select(`
+        order_index,
+        phase_name:name,
+        phase_description:description,
+        scenarios!inner (
+          id,
+          name,
+          principle,
+          context,
+          challenge,
+          task,
+          key_concepts,
+          visual_model,
+          difficulty,
+          skill_name,
+          project_mandate,
+          questions (
+            id,
+            question_text,
+            options
+          )
+        )
+      `)
+      .eq('assessment_id', assessmentData.id)
+      .order('order_index', { ascending: true });
+
+    if (phasesError || !phasesData) {
+       console.error('Error fetching phases and scenarios:', phasesError);
+       return { success: false, message: 'Failed to fetch scenarios', data: null as any };
+    }
+
+    // 5. Map the database results into the expected ScenariosResponse format
+    const scenarios = phasesData.map((phase: any) => {
+      const dbScenario = phase.scenarios;
+      
+      return {
+        scenario_id: phase.order_index,
+        db_scenario_id: dbScenario.id, // Keep the real ID just in case
+        skill_name: dbScenario.skill_name || 'General Skill',
+        difficulty: dbScenario.difficulty || 'medium',
+        phase: phase.phase_name,
+        phase_description: phase.phase_description,
+        scenario_name: dbScenario.name,
+        project_mandate: dbScenario.project_mandate || {
+            business_problem: dbScenario.context,
+            high_level_goal: dbScenario.task,
+            initial_budget: "N/A"
+        },
+        reference_materials: {
+          key_concepts: dbScenario.key_concepts || [],
+          visual_model: dbScenario.visual_model || { name: "Model", description: "Standard Model" }
+        },
+        questions: (dbScenario.questions || []).map((q: any) => ({
+          question_id: q.id,
+          question_text: q.question_text,
+          options: (q.options || []).map((opt: any) => ({
+             option_id: opt.option_id,
+             text: opt.text || opt.option_text,
+             is_correct: opt.is_correct
+          }))
+        }))
+      };
+    });
+
+    return {
+      success: true,
+      message: 'Scenarios loaded successfully',
+      data: {
+        bundle_id: assessmentData.id,
+        role_name: roleData.role_name,
+        progress: {
+          ready: scenarios.length,
+          total: scenarios.length,
+          generating: 0,
+          pending: 0
+        },
+        scenarios: scenarios
+      }
+    };
+
+  } catch (error) {
+    console.error('Exception fetching scenarios:', error);
+    return { success: false, message: 'Exception occurred', data: null as any };
+  }
 };
 
 /**
@@ -523,44 +804,57 @@ export const createRazorpayOrder = async (params: CreateOrderParams): Promise<Cr
   };
 };
 
-const PAYMENT_API_URL = 'https://xgfy-czuw-092q.m2.xano.io/api:IfQi_Nyx/mcp/razorpay_order';
+// Supabase configuration for edge functions
+const SUPABASE_URL = 'https://api-supabase.learntube.ai';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InBuZHF2dHVlanV4YW5oenZ1d29oIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk3NjIzODgsImV4cCI6MjA4NTMzODM4OH0.7_ZiCYTQzhSgspHcs25cS5t5iK0jV1CjrM0bAg3_-Wk';
 
 /**
- * Create Payment Order (Real API)
+ * Create Payment Order via Supabase Edge Function
  */
 export const createPaymentOrder = async (
     amount: number, 
     purchasedProducts: string, 
-    projectName: string = 'experiment-certifications', 
-    additionalNotes: any = {}
+    projectName: string = 'specialized_platform_main', 
+    additionalNotes: any = {},
+    detailedItems: any[] = [] // NEW: Add detailed items parameter
 ) => {
   try {
     const requestBody = {
       amount: amount * 100, // Convert to paise (multiply by 100)
+      currency: 'INR',
       notes: {
         project_name: projectName,
         purchased_products: purchasedProducts,
+        detailed_items: JSON.stringify(detailedItems), // NEW: Pass detailed items as JSON string
         ...additionalNotes // Spread the additional notes (user details, etc.)
       }
     };
 
-    const response = await fetch(`${PAYMENT_API_URL}/create_order`, {
+    console.log('Creating order via Supabase edge function:', requestBody);
+
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/create-razorpay-order`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY
       },
       body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
+      const errorText = await response.text();
+      console.error('Supabase edge function error:', errorText);
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
     }
 
     const result = await response.json();
-    // Start of Selection
-    return result.response ? result.response.result : result; 
+    console.log('Supabase edge function response:', result);
+    
+    // The Supabase edge function returns the Razorpay order object directly
+    return result; 
   } catch (error) {
-    console.error('Error creating payment order:', error);
+    console.error('Error creating payment order via Supabase:', error);
     throw error;
   }
 };
@@ -583,8 +877,8 @@ export const checkPaymentStatus = async (orderId: number) => {
  */
 export const createCertificateRecord = async (
     sessionId: string,
-    recipientName: string,
-    certName: string,
+    _recipientName: string,
+    _certName: string,
     uniqueId: string,
     metadata: any = {} // ✨ NEW: Accept metadata
 ): Promise<CertificateRecord | null> => {
@@ -592,14 +886,15 @@ export const createCertificateRecord = async (
     
     try {
         const { data, error } = await supabase
-            .from('certificates')
+            .from('user_certificates')
             .insert({
                 session_id: sessionId,
-                recipient_name: recipientName,
-                certificate_name: certName,
-                unique_certificate_id: uniqueId,
+                user_id: metadata.user_id || null,
+                role_id: metadata.role_id || null,
+                role_certificate_id: metadata.role_certificate_id || null,
+                certificate_id: uniqueId,
                 status: 'pending',
-                metadata: metadata // ✨ NEW: Store metadata
+                metadata: metadata
             })
             .select()
             .single();
@@ -626,12 +921,12 @@ export const createCertificateRecord = async (
 export const updateCertificateUrl = async (uniqueId: string, url: string): Promise<boolean> => {
     try {
         const { error } = await supabase
-            .from('certificates')
+            .from('user_certificates')
             .update({
-                image_url: url,
+                certificate_image_url: url,
                 status: 'generated'
             })
-            .eq('unique_certificate_id', uniqueId);
+            .eq('certificate_id', uniqueId);
 
         if (error) {
             console.error('Error updating certificate URL:', error);
@@ -650,7 +945,7 @@ export const updateCertificateUrl = async (uniqueId: string, url: string): Promi
 export const getCertificatesBySession = async (sessionId: string): Promise<CertificateRecord[]> => {
     try {
         const { data, error } = await supabase
-            .from('certificates')
+            .from('user_certificates')
             .select('*')
             .eq('session_id', sessionId);
 
@@ -844,18 +1139,18 @@ export const createCertificateDownload = async (certificateId: string, itemDetai
     // 1. Check if we already have a generated URL in DB
     try {
         const { data } = await supabase
-            .from('certificates')
-            .select('image_url, status, recipient_name, metadata')
-            .eq('unique_certificate_id', certificateId)
+            .from('user_certificates')
+            .select('certificate_image_url, status, metadata')
+            .eq('certificate_id', certificateId)
             .single();
 
-        if (data && data.image_url && data.status === 'generated') {
+        if (data && data.certificate_image_url && data.status === 'generated') {
             console.log('API: Returning cached certificate URL');
             return {
                 result: 'success',
                 message: 'Download link retrieved from cache',
                 data: {
-                    certificate_image_link: data.image_url
+                    certificate_image_link: data.certificate_image_url
                 }
             };
         }
@@ -872,20 +1167,20 @@ export const createCertificateDownload = async (certificateId: string, itemDetai
     // Attempt to fetch fresh data from DB record if we have the ID, as it's the most reliable source for regeneration
     try {
         const { data: certRecord } = await supabase
-            .from('certificates')
-            .select('recipient_name, metadata, certificate_name')
-            .eq('unique_certificate_id', certificateId)
+            .from('user_certificates')
+            .select('metadata')
+            .eq('certificate_id', certificateId)
             .single();
         
-        if (certRecord) {
-            if (certRecord.recipient_name) {
-                recipientName = certRecord.recipient_name;
+        if (certRecord && certRecord.metadata) {
+            if (certRecord.metadata.user_name) {
+                recipientName = certRecord.metadata.user_name;
             }
-            if (certRecord.certificate_name) {
-                certNameFull = certRecord.certificate_name;
+            if (certRecord.metadata.certificate_name) {
+                certNameFull = certRecord.metadata.certificate_name;
             }
-            if (certRecord.metadata?.certification_name_short) {
-                certNameShort = certRecord.metadata.certification_name_short;
+            if (certRecord.metadata.cert_short_name) {
+                certNameShort = certRecord.metadata.cert_short_name;
             }
             console.log('API: Using data from DB record for generation:', { recipientName, certNameShort });
         }
@@ -964,5 +1259,476 @@ export const createCertificateDownload = async (certificateId: string, itemDetai
             message: 'Generation failed, using mock',
             data: { certificate_image_link: mockUrl }
         };
+    }
+};
+
+/**
+ * Create or update user assessment record
+ */
+export const createUserAssessment = async (data: {
+    session_id: number;
+    user_id?: number;
+    role_id?: number;
+    assessment_id?: number;
+    current_phase_id?: number;
+    user_answers?: any;
+    score?: number;
+    is_passed?: boolean;
+    is_complete?: boolean;
+    time_taken?: number;
+}) => {
+    console.log('API: Creating/updating user assessment:', data);
+    
+    try {
+        // First check if assessment already exists for this session
+        const { data: existingData } = await supabase
+            .from('user_assessments')
+            .select('id, current_phase_id, user_answers')
+            .eq('session_id', data.session_id)
+            .single();
+
+        let result;
+        if (existingData) {
+            // Update existing assessment
+            const updatedData = { ...data };
+            // Merge user_answers if both exist
+            if (existingData.user_answers && data.user_answers) {
+                updatedData.user_answers = {
+                    ...existingData.user_answers,
+                    ...data.user_answers
+                };
+            }
+            
+            result = await supabase
+                .from('user_assessments')
+                .update(updatedData)
+                .eq('id', existingData.id)
+                .select()
+                .single();
+        } else {
+            // Create new assessment
+            result = await supabase
+                .from('user_assessments')
+                .insert(data)
+                .select()
+                .single();
+        }
+
+        if (result.error) {
+            console.error('Failed to save user assessment:', result.error);
+            throw result.error;
+        }
+
+        console.log('User assessment saved successfully:', result.data);
+        return {
+            result: 'success',
+            message: 'Assessment saved',
+            data: result.data
+        };
+    } catch (error) {
+        console.error('Error in createUserAssessment:', error);
+        throw error;
+    }
+};
+
+/**
+ * Update assessment phase progress
+ */
+export const updateAssessmentPhase = async (
+    sessionId: number, 
+    phaseNumber: number, 
+    phaseAnswers: any,
+    timeTaken?: number
+) => {
+    console.log(`API: Updating assessment phase ${phaseNumber} for session ${sessionId}`);
+    
+    try {
+        // Get the actual phase ID from phase number
+        const { data: phaseData } = await supabase
+            .from('assessment_phases')
+            .select('id')
+            .eq('order_index', phaseNumber)
+            .single();
+
+        const phaseId = phaseData?.id;
+        if (!phaseId) {
+            console.warn(`No phase found for order_index ${phaseNumber}`);
+        }
+
+        // Get existing assessment
+        const { data: existingData } = await supabase
+            .from('user_assessments')
+            .select('id, user_answers, time_taken, current_phase_id')
+            .eq('session_id', sessionId)
+            .single();
+
+        if (!existingData) {
+            // Create new assessment if it doesn't exist
+            return await createUserAssessment({
+                session_id: sessionId,
+                current_phase_id: phaseId || null,
+                user_answers: { [phaseNumber]: phaseAnswers },
+                time_taken: timeTaken || 0,
+                is_complete: false
+            });
+        }
+
+        // Update existing assessment with new phase data
+        const updatedAnswers = {
+            ...(existingData.user_answers || {}),
+            [phaseNumber]: phaseAnswers
+        };
+
+        const { error } = await supabase
+            .from('user_assessments')
+            .update({
+                current_phase_id: phaseId || existingData.current_phase_id,
+                user_answers: updatedAnswers,
+                time_taken: (existingData.time_taken || 0) + (timeTaken || 0)
+            })
+            .eq('id', existingData.id);
+
+        if (error) {
+            console.error('Failed to update assessment phase:', error);
+            throw error;
+        }
+
+        console.log(`Assessment phase ${phaseNumber} updated successfully`);
+        return {
+            result: 'success',
+            message: 'Phase updated',
+            data: { phase_number: phaseNumber, phase_id: phaseId }
+        };
+    } catch (error) {
+        console.error('Error in updateAssessmentPhase:', error);
+        throw error;
+    }
+};
+
+/**
+ * Complete assessment with final score
+ */
+export const completeAssessment = async (
+    sessionId: number,
+    finalScore: number,
+    isPassed: boolean,
+    totalTimeTaken: number
+) => {
+    console.log(`API: Completing assessment for session ${sessionId}`);
+    
+    try {
+        const { error } = await supabase
+            .from('user_assessments')
+            .update({
+                score: finalScore,
+                is_passed: isPassed,
+                is_complete: true,
+                time_taken: totalTimeTaken
+            })
+            .eq('session_id', sessionId);
+
+        if (error) {
+            console.error('Failed to complete assessment:', error);
+            throw error;
+        }
+
+        console.log('Assessment completed successfully');
+        return {
+            result: 'success',
+            message: 'Assessment completed',
+            data: { score: finalScore, passed: isPassed }
+        };
+    } catch (error) {
+        console.error('Error in completeAssessment:', error);
+        throw error;
+    }
+};
+
+/**
+ * Get user assessment data from database by session ID
+ */
+export const getUserAssessmentBySession = async (sessionId: number | string) => {
+    console.log(`API: Fetching user assessment for session ${sessionId}`);
+    
+    try {
+        const { data, error } = await supabase
+            .from('user_assessments')
+            .select(`
+                id,
+                session_id,
+                user_id,
+                score,
+                is_passed,
+                is_complete,
+                user_answers,
+                time_taken,
+                created_at,
+                current_phase_id
+            `)
+            .eq('session_id', sessionId)
+            .single();
+
+        if (error) {
+            console.error('Failed to fetch user assessment:', error);
+            throw error;
+        }
+
+        if (!data) {
+            throw new Error('No assessment found for this session');
+        }
+
+        console.log('User assessment fetched successfully:', data);
+        return {
+            result: 'success',
+            message: 'Assessment data retrieved',
+            data
+        };
+    } catch (error) {
+        console.error('Error in getUserAssessmentBySession:', error);
+        throw error;
+    }
+};
+
+/**
+ * Get certificates for a specific role
+ */
+export const getCertificatesByRole = async (roleId: number) => {
+    console.log(`API: Fetching certificates for role ${roleId}`);
+    
+    try {
+        const { data, error } = await supabase
+            .from('role_certificates')
+            .select(`
+                id,
+                role_id,
+                name,
+                short_name,
+                cert_id_prefix,
+                type,
+                order_index,
+                preview_image,
+                description,
+                certificate_name,
+                price,
+                original_price,
+                badge,
+                skill_frameworks
+            `)
+            .eq('role_id', roleId)
+            .order('order_index', { ascending: true });
+
+        if (error) {
+            console.error('Failed to fetch certificates:', error);
+            throw error;
+        }
+
+        console.log('Certificates fetched successfully:', data);
+        return {
+            result: 'success',
+            message: 'Certificates retrieved',
+            data: data || []
+        };
+    } catch (error) {
+        console.error('Error in getCertificatesByRole:', error);
+        throw error;
+    }
+};
+
+/**
+ * Generate Certificate Images - Generate images for certificates that need them
+ */
+export const generateCertificateImages = async (
+    sessionId: string
+): Promise<{
+    success: boolean;
+    certificates_processed: number;
+    certificates_generated: number;
+    certificates_up_to_date: number;
+    certificates: Array<{
+        certificate_id: string;
+        status: 'generated' | 'up_to_date' | 'failed';
+        image_url?: string;
+        expires_at?: string;
+        error?: string;
+    }>;
+}> => {
+    console.log(`API: Generating certificate images for session ${sessionId}`);
+    
+    try {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-certificate-images`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                'apikey': SUPABASE_ANON_KEY
+            },
+            body: JSON.stringify({
+                session_id: sessionId
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Certificate image generation error:', errorText);
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('Certificate image generation response:', result);
+        
+        return result;
+    } catch (error) {
+        console.error('Error generating certificate images:', error);
+        throw error;
+    }
+};
+
+/**
+ * Generate User Certificates via Supabase Edge Function
+ * @deprecated Use processPaymentWebhook + generateCertificateImages instead
+ */
+export const generateUserCertificates = async (
+    sessionId: string, 
+    orderId: string
+): Promise<{
+    success: boolean;
+    certificates_generated: number;
+    certificates: Array<{
+        certificate_id: string;
+        status: 'pending' | 'generated' | 'failed';
+        image_url?: string;
+        error?: string;
+    }>;
+}> => {
+    console.log(`API: [DEPRECATED] Generating certificates for session ${sessionId}, order ${orderId}`);
+    
+    try {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-user-certificates`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                'apikey': SUPABASE_ANON_KEY
+            },
+            body: JSON.stringify({
+                session_id: sessionId,
+                order_id: orderId
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Certificate generation API error:', errorText);
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('Certificate generation response:', result);
+        
+        return result;
+    } catch (error) {
+        console.error('Error generating user certificates:', error);
+        throw error;
+    }
+};
+
+/**
+ * Get User Certificates by Session ID
+ */
+export const getUserCertificates = async (sessionId: string) => {
+    console.log(`API: Fetching user certificates for session ${sessionId}`);
+    
+    try {
+        // First get the user_id from session
+        const { data: sessionData, error: sessionError } = await supabase
+            .from('sessions')
+            .select('user_id')
+            .eq('id', sessionId)
+            .single();
+
+        if (sessionError || !sessionData?.user_id) {
+            console.error('Failed to get session data:', sessionError);
+            return [];
+        }
+
+        const { data, error } = await supabase
+            .from('user_certificates')
+            .select(`
+                id,
+                certificate_id,
+                certificate_image_url,
+                certificate_image_expires_at,
+                status,
+                issued_at,
+                metadata,
+                role_certificates!inner(
+                    name,
+                    short_name,
+                    certificate_name,
+                    preview_image
+                )
+            `)
+            .eq('user_id', sessionData.user_id)
+            .order('issued_at', { ascending: true });
+
+        if (error) {
+            console.error('Failed to fetch user certificates:', error);
+            return [];
+        }
+
+        // Check for expired images and mark them as needing regeneration
+        const now = new Date();
+        const processedCerts = (data || []).map(cert => ({
+            ...cert,
+            image_expired: cert.certificate_image_expires_at && 
+                           new Date(cert.certificate_image_expires_at) <= now,
+            needs_generation: !cert.certificate_image_url || 
+                             (cert.certificate_image_expires_at && 
+                              new Date(cert.certificate_image_expires_at) <= now)
+        }));
+
+        console.log('User certificates fetched successfully:', processedCerts.length);
+        return processedCerts;
+    } catch (error) {
+        console.error('Error in getUserCertificates:', error);
+        return [];
+    }
+};
+
+/**
+ * Get User Certificates by User ID
+ */
+export const getUserCertificatesByUserId = async (userId: number) => {
+    console.log(`API: Fetching user certificates for user ${userId}`);
+    
+    try {
+        const { data, error } = await supabase
+            .from('user_certificates')
+            .select(`
+                id,
+                certificate_id,
+                certificate_image_url,
+                status,
+                issued_at,
+                role_certificates!inner(
+                    name,
+                    short_name,
+                    certificate_name,
+                    preview_image
+                )
+            `)
+            .eq('user_id', userId)
+            .order('issued_at', { ascending: false });
+
+        if (error) {
+            console.error('Failed to fetch user certificates by user ID:', error);
+            return [];
+        }
+
+        console.log('User certificates by user ID fetched successfully:', data);
+        return data || [];
+    } catch (error) {
+        console.error('Error in getUserCertificatesByUserId:', error);
+        return [];
     }
 };

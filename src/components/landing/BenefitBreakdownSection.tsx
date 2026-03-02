@@ -1,6 +1,23 @@
 import ScorecardVisual from './ScorecardVisual';
+import type { RoleData } from '../../types';
 
-const BenefitBreakdownSection = () => {
+interface BenefitBreakdownSectionProps {
+    roleData: RoleData | null;
+}
+
+const BenefitBreakdownSection = ({ roleData }: BenefitBreakdownSectionProps) => {
+
+    const displayRoleName = roleData?.role_name || "HR";
+
+    // Default to the static frameworks if none are in the DB or loading
+    const rawFrameworks = roleData?.frameworks?.length ? roleData.frameworks : ["Strategic HR, Talent Management"];
+
+    // Safely format the frameworks into a readable string
+    const formattedFrameworks = rawFrameworks.length > 1
+        ? `${rawFrameworks.slice(0, -1).join(', ')}, and ${rawFrameworks[rawFrameworks.length - 1]}`
+        : rawFrameworks[0] || "";
+
+
     return (
         <section className="py-20 px-4 md:px-6 relative bg-[#00141F]">
             <div className="max-w-7xl mx-auto flex flex-col lg:grid lg:grid-cols-2 gap-12 items-center">
@@ -40,7 +57,7 @@ const BenefitBreakdownSection = () => {
                             <div>
                                 <h3 className="text-xl font-bold text-white mb-2">Beat ATS Filters</h3>
                                 <p className="text-white/60 leading-relaxed">
-                                    Recruiting systems look for keywords. Your certification verifies framework skills (Strategic HR, Talent Management), ensuring your resume gets seen.
+                                    Recruiting systems look for keywords. Your certification verifies {formattedFrameworks} skills, ensuring your resume gets seen.
                                 </p>
                             </div>
                         </div>
@@ -57,7 +74,7 @@ const BenefitBreakdownSection = () => {
                             <div>
                                 <h3 className="text-xl font-bold text-white mb-2">Negotiate For More</h3>
                                 <p className="text-white/60 leading-relaxed">
-                                    Don't just ask for a raise; justify it. Use your Global Rank and specialized framework competence to anchor your salary negotiations.
+                                    Don't just ask for a raise; justify it. Use your Global Rank and specialized {displayRoleName} competence to anchor your salary negotiations.
                                 </p>
                             </div>
                         </div>
@@ -68,7 +85,7 @@ const BenefitBreakdownSection = () => {
                 <div className="w-full relative">
                     {/* Sample Scorecard Visual */}
                     {/* Sample Scorecard Visual */}
-                    <ScorecardVisual />
+                    <ScorecardVisual roleData={roleData} />
                 </div>
             </div>
         </section>

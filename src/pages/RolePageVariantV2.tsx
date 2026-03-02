@@ -1,10 +1,11 @@
 
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
-import { createSession, checkCertifiedUser } from '../services/api';
+import { createSession, checkCertifiedUser, getRoleDetails } from '../services/api';
 import { extractUrlParams, extractEmailFromUrl } from '../utils/urlParams';
 import { storeSessionId, storeRole, storeUrlParams, hasValidSession, storeEmail, storeContactDetails, getStoredSessionId } from '../utils/localStorage';
 import { analytics } from '../services/analytics';
+import type { RoleData } from '../types';
 
 // Components
 import TopBar from '../components/TopBar';
@@ -19,7 +20,7 @@ import StickyMobileCTA from '../components/landing/StickyMobileCTA';
 
 const RolePageVariantV2 = () => {
     const [searchParams] = useSearchParams();
-    const role = searchParams.get('role') || 'HR Leader';
+    const role = searchParams.get('role') || 'Your Desired Role';
     const navigate = useNavigate();
 
     const [isLoadingSession, setIsLoadingSession] = useState(false);
@@ -27,6 +28,29 @@ const RolePageVariantV2 = () => {
     const [isTransitioning, setIsTransitioning] = useState(false);
     const [transitionOrigin, setTransitionOrigin] = useState({ x: 0, y: 0 });
     const [showStickyCTA, setShowStickyCTA] = useState(false);
+
+    // Dynamic Role Data State
+    const [roleData, setRoleData] = useState<RoleData | null>(null);
+    const [, setIsLoadingRole] = useState(true);
+
+    // Fetch dynamic role data on mount or when role changes
+    useEffect(() => {
+        const fetchRoleData = async () => {
+            setIsLoadingRole(true);
+            try {
+                const data = await getRoleDetails(role);
+                setRoleData(data);
+            } catch (error) {
+                console.error("Failed to load role details:", error);
+            } finally {
+                setIsLoadingRole(false);
+            }
+        };
+
+        if (role) {
+            fetchRoleData();
+        }
+    }, [role]);
 
     // Scroll tracking for Sticky CTA
     useEffect(() => {
@@ -121,6 +145,11 @@ const RolePageVariantV2 = () => {
             const currentSessionId = getStoredSessionId();
             if (currentSessionId) {
                 analytics.register({ session_id: currentSessionId, role_name: role });
+                analytics.setSessionId(currentSessionId); // Ensure analytics service has the session ID
+                
+                if (import.meta.env.DEV) {
+                    console.log('[RolePage] 📝 Registered existing session with analytics:', currentSessionId.slice(0, 8) + '...');
+                }
             }
 
             analytics.track('view_role_page', { role_name: role, variant: 'v2' });
@@ -162,6 +191,14 @@ const RolePageVariantV2 = () => {
             const sessionResponse = await createSession(role, utmParams);
             storeSessionId(sessionResponse.session_id);
 
+            // Register the new session ID with analytics
+            analytics.register({ session_id: sessionResponse.session_id, role_name: role });
+            analytics.setSessionId(sessionResponse.session_id);
+            
+            if (import.meta.env.DEV) {
+                console.log('[RolePage] 🎯 New session created and registered:', sessionResponse.session_id.slice(0, 8) + '...');
+            }
+
             setIsTransitioning(true);
             setTimeout(() => navigate('/loading'), 800);
         } catch (error) {
@@ -189,18 +226,19 @@ const RolePageVariantV2 = () => {
                 <HeroSectionV2
                     onBeginAssessment={() => handleBeginAssessment()}
                     isLoading={isLoadingSession || isTransitioning}
+                    roleData={roleData}
                 />
 
                 {/* Social Proof Moved Higher */}
                 <SocialProofSection />
 
-                <ProblemAgitationSection />
+                <ProblemAgitationSection roleData={roleData} />
 
                 <HowItWorksSection />
 
-                <BenefitBreakdownSection />
+                <BenefitBreakdownSection roleData={roleData} />
 
-                <FAQSection />
+                <FAQSection roleData={roleData} />
 
                 <FinalCTASection
                     onBeginAssessment={() => handleBeginAssessment()}

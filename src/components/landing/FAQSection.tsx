@@ -1,8 +1,21 @@
 import { useState } from 'react';
 import { ShieldCheck, Clock, CheckCircle2 } from 'lucide-react';
+import type { RoleData } from '../../types';
 
-const FAQSection = () => {
+interface FAQSectionProps {
+    roleData: RoleData | null;
+}
+
+const FAQSection = ({ roleData }: FAQSectionProps) => {
     const [openIndex, setOpenIndex] = useState<number | null>(null);
+
+    // Default to the static frameworks if none are in the DB or loading
+    const rawFrameworks = roleData?.frameworks?.length ? roleData.frameworks : ["CHRPx", "SHRBPx"];
+
+    // Safely format the frameworks into a readable string
+    const formattedFrameworks = rawFrameworks.length > 1
+        ? `${rawFrameworks.slice(0, -1).join(', ')} and ${rawFrameworks[rawFrameworks.length - 1]}`
+        : rawFrameworks[0] || "";
 
     const faqs = [
         {
@@ -15,7 +28,7 @@ const FAQSection = () => {
         },
         {
             question: "Will recruiters recognize this?",
-            answer: "Yes. Our certifications are backed by rigorous standards aligned with Global HR Certification (CHRPx, SHRBPx) competencies and industry-recognized strategic HR frameworks, making them highly credible for senior roles."
+            answer: `Yes. Our certifications are backed by rigorous standards aligned with Global Certification (${formattedFrameworks}) competencies and industry-recognized strategic frameworks, making them highly credible for senior roles.`
         },
         {
             question: "What happens if I don't pass?",

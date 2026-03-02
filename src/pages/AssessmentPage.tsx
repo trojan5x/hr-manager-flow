@@ -4,7 +4,8 @@ import lottie from 'lottie-web';
 import AssessmentProgressBar from '../components/AssessmentProgressBar';
 // import InteractiveWalkthrough, { type Step } from '../components/InteractiveWalkthrough';
 import TopBar from '../components/TopBar';
-import { fetchBundleScenarios, updateProgressWithRetry } from '../services/api';
+import { fetchBundleScenarios, updateProgressWithRetry, createUserAssessment, updateAssessmentPhase, completeAssessment } from '../services/api';
+import { supabase } from '../services/supabaseClient';
 import {
     getStoredBundleId,
     getStoredSessionId,
@@ -54,6 +55,7 @@ const AssessmentPage = () => {
     const [isLoadingScenario, setIsLoadingScenario] = useState(true);
     const [apiError, setApiError] = useState<string | null>(null);
     const [bundleId, setBundleId] = useState<string | null>(null);
+    const [sessionId, setSessionId] = useState<string | null>(null); // State for explicit session tracking
 
     // Progress saving state
     const [answersSaved, setAnswersSaved] = useState(0);
@@ -134,11 +136,27 @@ const AssessmentPage = () => {
     // Initialize bundle ID and restore backup data from localStorage
     useEffect(() => {
         // Ensure we have a session ID locally - CRITICAL for skipped flow
-        let currentSessionId = getStoredSessionId();
+        let currentSessionId = searchParams.get('session') || getStoredSessionId();
         if (!currentSessionId) {
             currentSessionId = `session_${Date.now()}`;
             storeSessionId(currentSessionId);
             console.log('Created new local session:', currentSessionId);
+        } else if (searchParams.get('session')) {
+            // If it came from URL, store it to update local
+            storeSessionId(currentSessionId);
+        }
+
+        // Save to component state
+        setSessionId(currentSessionId);
+
+        // Register session with analytics if available
+        if (currentSessionId) {
+            analytics.register({ session_id: currentSessionId });
+            analytics.setSessionId(currentSessionId);
+            
+            if (import.meta.env.DEV) {
+                console.log('[AssessmentPage] 📝 Registered session with analytics:', currentSessionId.slice(0, 8) + '...');
+            }
         }
 
         const storedBundleId = getStoredBundleId();
@@ -176,15 +194,38 @@ const AssessmentPage = () => {
         const loadScenarios = async () => {
             try {
                 setApiError(null);
+
+                // Get the local session ID (we need this to fetch the role string from db)
+                const currentSessionId = searchParams.get('session') || getStoredSessionId();
+                if (currentSessionId) {
+                    setSessionId(currentSessionId);
+                    
+                    // Ensure analytics has the session ID
+                    analytics.register({ session_id: currentSessionId });
+                    analytics.setSessionId(currentSessionId);
+                }
+
+                if (!currentSessionId) {
+                    throw new Error('No session ID found');
+                }
+
                 // In static mode, we fetch once and it's always ready
-                const response: ScenariosResponse = await fetchBundleScenarios(bundleId);
+                // Now fetching using the true Session ID so the backend can look up the role
+                const response: ScenariosResponse = await fetchBundleScenarios(currentSessionId);
+
+                // Add this guard
+                if (!response.success || !response.data) {
+                    // Start over, session is invalid
+                    console.error("Session invalid or not found in backend:", response.message);
+                    throw new Error(response.message || 'Session not found');
+                }
 
                 setScenarios(response.data.scenarios);
 
                 // FORCE progress to be fully ready for static mode
                 setScenariosProgress({
-                    ready: 5,
-                    total: 5,
+                    ready: response.data.scenarios.length,
+                    total: response.data.scenarios.length,
                     generating: 0,
                     pending: 0
                 });
@@ -193,9 +234,32 @@ const AssessmentPage = () => {
                 setIsInitialLoading(false);
                 setIsLoadingScenario(false);
 
+                // Create initial user assessment record
+                try {
+                    // Get the first phase ID
+                    const { data: firstPhaseData } = await supabase
+                        .from('assessment_phases')
+                        .select('id')
+                        .eq('order_index', 1)
+                        .single();
+
+                    await createUserAssessment({
+                        session_id: parseInt(currentSessionId),
+                        current_phase_id: firstPhaseData?.id || null,
+                        is_complete: false,
+                        user_answers: {}
+                    });
+                    console.log('Initial user assessment record created');
+                } catch (assessmentError) {
+                    console.warn('Failed to create initial assessment record:', assessmentError);
+                    // Don't block the assessment if this fails
+                }
+
             } catch (error) {
                 console.error('Error loading scenarios:', error);
                 setApiError(error instanceof Error ? error.message : 'Failed to load scenarios');
+                setIsInitialLoading(false);
+                setIsLoadingScenario(false);
             }
         };
 
@@ -301,23 +365,19 @@ const AssessmentPage = () => {
         }
     }, [currentPhase, scenarios, isInitialLoading, isCompleted]);
 
-    // Assessment phases - Based on CRISP-DM methodology for Data Analytics
-    const phases = [
-        'Business Understanding',
-        'Data Understanding',
-        'Data Preparation',
-        'Modeling & Analysis',
-        'Evaluation & Insights'
-    ];
+    // Assessment phases - dynamically pulled from scenarios
+    const phases = scenarios.length > 0
+        ? scenarios.map(s => s.phase || `Phase ${s.scenario_id}`)
+        : ['Phase 1', 'Phase 2', 'Phase 3', 'Phase 4', 'Phase 5'];
 
     // Short labels for progress bar
-    const phaseLabels = [
-        'Business',
-        'Data',
-        'Prepare',
-        'Model',
-        'Evaluate'
-    ];
+    const phaseLabels = scenarios.length > 0
+        ? scenarios.map(s => {
+            if (!s.phase) return `Phase ${s.scenario_id}`;
+            const parts = s.phase.split(' ');
+            return parts[0].length > 4 ? parts[0] : parts.slice(0, 2).join(' ');
+        })
+        : ['One', 'Two', 'Three', 'Four', 'Five'];
 
     // Function to get scenario briefing for each phase from API data
     const getScenarioBriefing = (phase: number) => {
@@ -411,8 +471,8 @@ const AssessmentPage = () => {
 
     // Save scenario completion with answers
     const saveScenarioCompletion = async (scenarioIndex: number, finalAnswer?: UserAnswer) => {
-        const sessionId = getStoredSessionId();
-        if (!sessionId) {
+        const activeSessionId = sessionId || getStoredSessionId();
+        if (!activeSessionId) {
             console.error('No session ID found, cannot save progress');
             return;
         }
@@ -431,32 +491,47 @@ const AssessmentPage = () => {
 
             // Get scenario details
             const currentScenario = scenarios.find(s => s.scenario_id === scenarioIndex);
+            const phaseTimeTaken = Math.round((Date.now() - phaseStartTime.current) / 1000);
 
-            // Build the new format with attempt_object
+            // Build the new format with attempt_object for the existing API
             const progressData: ProgressUpdateRequest = {
-                session_id: Number(sessionId),
+                session_id: Number(activeSessionId) || 0, // Avoid NaN if it is a mock string ID
                 attempt_object: {
                     phase_number: scenarioIndex, // 1-based phase number
                     phase_name: currentScenario ? (currentScenario.scenario_name || currentScenario.skill_name) : (phases[scenarioIndex - 1] || `Phase ${scenarioIndex}`),
                     scenario_id: currentScenario ? currentScenario.scenario_id : 0,
-                    time_taken_in_seconds: Math.round((Date.now() - phaseStartTime.current) / 1000), // ✨ Calculate time taken in seconds
+                    time_taken_in_seconds: phaseTimeTaken, // ✨ Calculate time taken in seconds
                     phase_user_answers: scenarioAnswers.map(answer => ({
                         question_id: answer.question_id,
                         selected_option: answer.selected_option
                     }))
                 },
-                time_taken_in_seconds: cumulativeTime + Math.round((Date.now() - phaseStartTime.current) / 1000) // ✨ Total time so far
+                time_taken_in_seconds: cumulativeTime + phaseTimeTaken // ✨ Total time so far
             };
 
             console.log('Saving scenario completion:', progressData);
 
+            // Save to existing progress API
             const response = await updateProgressWithRetry(progressData);
+
+            // ALSO save to user_assessments table with phase data
+            const phaseAnswersForDb: { [questionId: number]: string } = {};
+            scenarioAnswers.forEach(answer => {
+                phaseAnswersForDb[answer.question_id] = answer.selected_option;
+            });
+
+            await updateAssessmentPhase(
+                parseInt(activeSessionId),
+                scenarioIndex,
+                phaseAnswersForDb,
+                phaseTimeTaken
+            );
 
             // Update local state on success
             setCompletedScenarios(prev => prev + 1);
             setAnswersSaved(prev => prev + scenarioAnswers.length);
             // Update cumulative time
-            setCumulativeTime(prev => prev + Math.round((Date.now() - phaseStartTime.current) / 1000));
+            setCumulativeTime(prev => prev + phaseTimeTaken);
 
             // Persist phase-wise data
             if (bundleId) {
@@ -562,7 +637,7 @@ const AssessmentPage = () => {
                 saveScenarioCompletion(currentPhase, finalAnswer);
 
                 // Show next phase button after animation completes and start auto-progress
-                setTimeout(() => {
+                setTimeout(async () => {
                     if (currentPhase < phases.length) { // Not the final phase
                         setShowNextPhaseButton(true);
                         // Start auto-progress animation
@@ -580,13 +655,60 @@ const AssessmentPage = () => {
                             bundle_id: bundleId
                         });
 
+                        // Calculate final score and complete assessment
+                        const totalQuestions = scenarios.reduce((sum, s) => sum + (s.questions?.length || 0), 0);
+                        const correctAnswers = userAnswers.reduce((correct, answer) => {
+                            // Find which scenario this answer belongs to
+                            for (const scenario of scenarios) {
+                                const question = scenario.questions?.find(q => q.question_id === answer.question_id);
+                                if (question) {
+                                    const correctOption = question.options.find(opt => opt.is_correct);
+                                    if (correctOption) {
+                                        const correctIndex = question.options.indexOf(correctOption);
+                                        const answerIndex = ['a', 'b', 'c', 'd'].indexOf(answer.selected_option);
+                                        if (answerIndex === correctIndex) {
+                                            return correct + 1;
+                                        }
+                                    }
+                                    break;
+                                }
+                            }
+                            return correct;
+                        }, 0);
+
+                        const finalScore = totalQuestions > 0 ? Math.round((correctAnswers / totalQuestions) * 100) : 0;
+                        const isPassed = finalScore >= 50;
+                        const totalTimeTaken = cumulativeTime + Math.round((Date.now() - phaseStartTime.current) / 1000);
+
+                        // Save final assessment completion
+                        try {
+                            const activeSessionId = sessionId || getStoredSessionId();
+                            if (activeSessionId) {
+                                await completeAssessment(
+                                    parseInt(activeSessionId),
+                                    finalScore,
+                                    isPassed,
+                                    totalTimeTaken
+                                );
+                                console.log('Final assessment saved:', { score: finalScore, passed: isPassed });
+                            }
+                        } catch (error) {
+                            console.error('Failed to save final assessment:', error);
+                            // Don't block the flow if this fails
+                        }
+
                         // Clear all backups since assessment is completed
                         clearAllBackups();
 
                         // After assessment complete animation, navigate to contact form
                         setTimeout(() => {
-                            // Navigate to contact details page
-                            window.location.href = `/contact-details?id=${assessmentId}`;
+                            // Navigate to contact details page with session ID
+                            const activeSessionId = sessionId || getStoredSessionId();
+                            const urlParams = new URLSearchParams();
+                            if (assessmentId) urlParams.append('id', assessmentId);
+                            if (activeSessionId) urlParams.append('session_id', activeSessionId);
+                            
+                            window.location.href = `/contact-details?${urlParams.toString()}`;
                         }, 4000); // 4 seconds for full celebration
                     }
                 }, 2500); // 2.5 seconds for completion animation

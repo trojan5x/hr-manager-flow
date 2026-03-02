@@ -236,17 +236,35 @@ const Homepage = () => {
         };
     }, []);
 
-    const handleGenerateAssessment = (trigger: 'button_click' | 'enter_key' = 'button_click') => {
+    const handleGenerateAssessment = async (trigger: 'button_click' | 'enter_key' = 'button_click') => {
         const params = new URLSearchParams(searchParams);
 
         if (searchQuery.trim()) {
-            analytics.track('generate_assessment_clicked', {
-                search_query: searchQuery.trim(),
-                trigger_method: trigger
-            });
-            // Navigate with the role query parameter to homepage, preserving other params
-            params.set('role', searchQuery.trim());
-            navigate(`/?${params.toString()}`);
+            setIsLoadingSuggestions(true);
+            try {
+                // Ensure the role actually exists before navigating to it
+                const roleExists = await searchRoles(searchQuery.trim(), 1);
+
+                if (roleExists.length > 0) {
+                    analytics.track('generate_assessment_clicked', {
+                        search_query: roleExists[0],
+                        trigger_method: trigger
+                    });
+
+                    params.set('role', roleExists[0]);
+                    navigate(`/?${params.toString()}`);
+                } else {
+                    // Fallback to the user's literal query if not explicitly defined
+                    params.set('role', searchQuery.trim());
+                    navigate(`/?${params.toString()}`);
+                }
+            } catch (error) {
+                // Navigate anyway as fallback
+                params.set('role', searchQuery.trim());
+                navigate(`/?${params.toString()}`);
+            } finally {
+                setIsLoadingSuggestions(false);
+            }
         } else {
             analytics.track('generate_assessment_clicked', {
                 search_query: 'empty',

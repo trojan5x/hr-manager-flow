@@ -21,6 +21,7 @@ import ResultsPageV3 from './pages/ResultsPageV3';
 import AssessmentPage from './pages/AssessmentPage';
 import FunnelDashboard from './pages/admin/FunnelDashboard';
 import FunnelDashboardComparison from './pages/admin/FunnelDashboardComparison';
+import RoleGeneratorDashboard from './pages/admin/RoleGeneratorDashboard';
 
 import AdminDashboard from './pages/AdminDashboard'; // ✨ NEW
 
@@ -29,6 +30,7 @@ function App() {
     <Routes>
       <Route path="/" element={<HomeOrRole />} />
       <Route path="/admin/certificates" element={<AdminDashboard />} /> {/* ✨ NEW */}
+      <Route path="/admin/role-generator" element={<RoleGeneratorDashboard />} /> {/* ✨ NEW */}
       <Route path="/design-system" element={<DesignSystem />} />
       <Route path="/select-skills" element={<SelectSkillsPage />} />
       <Route path="/loading" element={<LoadingPage />} />

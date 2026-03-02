@@ -1,18 +1,18 @@
 import { useState, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams } from 'react-router-dom';
 import TopBar from '../components/TopBar';
-import { fetchDeliverables, createCertificateDownload } from '../services/api';
+import { fetchDeliverables, createCertificateDownload, generateCertificateImages, getUserCertificates } from '../services/api';
 import type { DeliverableItem } from '../types';
 import { analytics } from '../services/analytics';
-import { getUserEmail, getUserName } from '../utils/localStorage';
+import { getUserEmail, getUserName, getStoredSessionId } from '../utils/localStorage';
 
 const PaymentSuccessPage = () => {
     const [searchParams] = useSearchParams();
-    const navigate = useNavigate();
 
     // State
-    // State
     const [isLoading, setIsLoading] = useState(true);
+    const [isGeneratingCertificates, setIsGeneratingCertificates] = useState(false);
+    const [certificateGenerationStatus, setCertificateGenerationStatus] = useState<string>('');
     const [downloadingCertId, setDownloadingCertId] = useState<string | null>(null);
     const [_error, setError] = useState<string | null>(null);
     const [purchasedItems, setPurchasedItems] = useState<DeliverableItem[]>([]);
@@ -24,10 +24,127 @@ const PaymentSuccessPage = () => {
     // Get params
     const paymentId = searchParams.get('payment_id');
     const orderId = searchParams.get('order_id');
-    const sessionId = searchParams.get('session_id'); // ✨ NEW
+    const sessionId = searchParams.get('session_id');
+
+    // Certificate image generation effect
+    useEffect(() => {
+        if (!sessionId) return;
+
+        const loadAndGenerateImages = async () => {
+            console.log('PaymentSuccess: Loading certificate records...');
+            setIsGeneratingCertificates(true);
+            setCertificateGenerationStatus('Loading your certificates...');
+            
+            try {
+                // Step 1: Load existing certificate records (should exist from webhook processing)
+                const userCertificates = await getUserCertificates(sessionId);
+                
+                if (!userCertificates || userCertificates.length === 0) {
+                    console.log('PaymentSuccess: No certificate records found, using fallback...');
+                    setCertificateGenerationStatus('Setting up certificates...');
+                    loadFallbackDeliverables();
+                    return;
+                }
+
+                console.log(`PaymentSuccess: Found ${userCertificates.length} certificate records`);
+
+                // Step 2: Display certificates immediately (even if images aren't ready yet)
+                displayCertificates(userCertificates);
+
+                // Step 3: Check which certificates need image generation
+                const certificatesNeedingImages = userCertificates.filter((cert: any) => cert.needs_generation);
+                
+                if (certificatesNeedingImages.length > 0) {
+                    console.log(`PaymentSuccess: ${certificatesNeedingImages.length} certificates need image generation`);
+                    setCertificateGenerationStatus(`Generating ${certificatesNeedingImages.length} certificate images...`);
+                    
+                    // Step 4: Generate images for certificates that need them
+                    const imageGenResult = await generateCertificateImages(sessionId);
+                    
+                    if (imageGenResult.success) {
+                        setCertificateGenerationStatus(
+                            `Generated ${imageGenResult.certificates_generated} new images, ${imageGenResult.certificates_up_to_date} already ready!`
+                        );
+                        console.log('PaymentSuccess: Image generation completed:', imageGenResult);
+                    } else {
+                        setCertificateGenerationStatus('Some certificate images may not be ready. Please try refreshing.');
+                        console.warn('PaymentSuccess: Image generation had issues:', imageGenResult);
+                    }
+
+                    // Step 5: Reload certificates with updated images
+                    setTimeout(async () => {
+                        const updatedCertificates = await getUserCertificates(sessionId);
+                        displayCertificates(updatedCertificates);
+                    }, 1000);
+                } else {
+                    setCertificateGenerationStatus('All certificate images are ready!');
+                    console.log('PaymentSuccess: All certificates already have valid images');
+                }
+                
+            } catch (error) {
+                console.error('PaymentSuccess: Certificate loading/generation failed:', error);
+                setCertificateGenerationStatus('Certificate processing failed. Please contact support.');
+                // Fall back to the old system
+                loadFallbackDeliverables();
+            } finally {
+                setIsGeneratingCertificates(false);
+            }
+        };
+
+        // Start the process
+        loadAndGenerateImages();
+    }, [sessionId]);
+
+    const displayCertificates = (userCertificates: any[]) => {
+        const mappedItems: DeliverableItem[] = userCertificates.map((cert: any) => ({
+            id: cert.id,
+            created_at: new Date(cert.issued_at).getTime(),
+            skill_name: cert.role_certificates?.name || 'Professional Certification',
+            certification_name: cert.role_certificates?.certificate_name || cert.role_certificates?.name,
+            certification_name_short: cert.role_certificates?.short_name || 'CERT',
+            unique_certificate_id: cert.certificate_id,
+            certificate_image_url: cert.certificate_image_url,
+            certificate_expires_at: cert.certificate_image_expires_at,
+            status: cert.status,
+            needs_generation: cert.needs_generation,
+            image_expired: cert.image_expired
+        }));
+
+        setPurchasedItems(mappedItems);
+        console.log('PaymentSuccess: Displaying certificates:', mappedItems.length);
+    };
+
+    const loadFallbackDeliverables = async () => {
+        // Fallback to the existing deliverables system
+        try {
+            const userName = getUserName() || 'Valued Professional';
+            const response = await fetchDeliverables(orderId || '', sessionId || undefined, userName);
+
+            if (response.result === 'success') {
+                setPurchasedItems(response.data);
+                console.log('PaymentSuccess: Loaded fallback deliverables:', response.data.length);
+            } else {
+                setError('Unable to fetch deliverables details.');
+            }
+        } catch (err) {
+            console.error('PaymentSuccess: Fallback deliverables failed:', err);
+            setError('Failed to load certificate details.');
+        }
+    };
 
     // Load deliverables list
     useEffect(() => {
+        // Register session if available
+        const currentSessionId = getStoredSessionId();
+        if (currentSessionId) {
+            analytics.register({ session_id: currentSessionId });
+            analytics.setSessionId(currentSessionId);
+            
+            if (import.meta.env.DEV) {
+                console.log('[PaymentSuccessPage] 📝 Registered session with analytics:', currentSessionId.slice(0, 8) + '...');
+            }
+        }
+        
         if (orderId) {
             analytics.track('view_payment_success', {
                 payment_id: paymentId,
@@ -35,85 +152,10 @@ const PaymentSuccessPage = () => {
             });
         }
 
-        const loadDeliverables = async () => {
-            // First check if we have locally stored purchased items (from ResultsPageV3)
-            try {
-                const storedItemsStr = localStorage.getItem('purchasedItems');
-                if (storedItemsStr) {
-                    const storedItems = JSON.parse(storedItemsStr);
-                    if (Array.isArray(storedItems) && storedItems.length > 0) {
-                        console.log('Using stored purchased items:', storedItems);
-                        // Even if local items exist, we try to ensure DB persistence if sessionId is present
-                        if (sessionId && (!storedItems[0].unique_certificate_id || storedItems[0].unique_certificate_id.startsWith('CERT-'))) {
-                            // If we have session ID but items look transient (starting with CERT-), 
-                            // we MIGHT want to call API to confirm persistence.
-                            // But for now, let's assume if we have items, we show them.
-                            // The 'download' action will trigger persistence if needed anyway.
-                        } else {
-                            const mappedItems: DeliverableItem[] = storedItems.map((item: any) => ({
-                                id: item.skill_id || Math.random(),
-                                created_at: Date.now(),
-                                skill_name: item.certification_name || 'Project Management', // Fallback
-                                certification_name: item.certification_name,
-                                certification_name_short: item.certification_name_short || 'CERT',
-                                unique_certificate_id: `CERT-${item.skill_id || 'X'}-${Date.now()}`
-                            }));
-                            setPurchasedItems(mappedItems);
-                            setIsLoading(false);
-                            return;
-                        }
-                    }
-                }
-            } catch (e) {
-                console.warn('Error reading stored items:', e);
-            }
-
-            if (!orderId) {
-                // If no params and no stored items, check if we're in dev mode or just redirect
-                setIsLoading(false);
-                return;
-            }
-
-            try {
-                // ✨ NEW: Pass session details for persistence
-                const userName = getUserName() || 'Valued Professional';
-                const response = await fetchDeliverables(orderId, sessionId || undefined, userName);
-
-                if (response.result === 'success') {
-                    setPurchasedItems(response.data);
-                } else {
-                    setError('Unable to fetch deliverables details.');
-                }
-            } catch (err) {
-                console.error('Fetch deliverables failed:', err);
-                setError('Failed to load certificate details.');
-
-                // Fallback for demo if API fails
-                setPurchasedItems([
-                    {
-                        id: 1,
-                        created_at: Date.now(),
-                        skill_name: 'Strategic HR Leadership',
-                        certification_name: 'Certified Strategic HR Leader',
-                        certification_name_short: 'CSHRL',
-                        unique_certificate_id: 'CSHRL-DEMO-001'
-                    },
-                    {
-                        id: 2,
-                        created_at: Date.now(),
-                        skill_name: 'HR Analytics',
-                        certification_name: 'Certified HR Analyst',
-                        certification_name_short: 'CHRA',
-                        unique_certificate_id: 'CHRA-DEMO-002'
-                    }
-                ]);
-            } finally {
-                setIsLoading(false);
-            }
-        };
-
-        loadDeliverables();
-    }, [orderId, navigate]);
+        // Set loading to false once certificate generation starts
+        // The certificate generation effect will handle the actual loading
+        setIsLoading(false);
+    }, [orderId, paymentId]);
 
     // Background pre-fetch of certificates
     useEffect(() => {
@@ -178,6 +220,33 @@ const PaymentSuccessPage = () => {
     const handleDownload = async (item: DeliverableItem) => {
         if (downloadingCertId) return; // Prevent multiple downloads at once
 
+        // If certificate has direct image URL and is already generated, use it
+        if ((item as any).certificate_image_url && (item as any).status === 'generated') {
+            try {
+                const imageResponse = await fetch((item as any).certificate_image_url);
+                const blob = await imageResponse.blob();
+                const url = window.URL.createObjectURL(blob);
+
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = `${item.certification_name.replace(/\s+/g, '_')}_Certificate.png`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                window.URL.revokeObjectURL(url);
+
+                analytics.track('certificate_downloaded', {
+                    certification_name: item.certification_name,
+                    unique_certificate_id: item.unique_certificate_id,
+                    download_method: 'direct_url'
+                });
+                return;
+            } catch (error) {
+                console.warn('Failed to download via direct URL, falling back to API:', error);
+                // Fall through to existing logic
+            }
+        }
+
         // If already prepared, use it instantly!
         if (preparedData[item.unique_certificate_id]) {
             const url = preparedData[item.unique_certificate_id];
@@ -186,7 +255,6 @@ const PaymentSuccessPage = () => {
             link.download = `${item.certification_name.replace(/\s+/g, '_')}_Certificate.png`;
             document.body.appendChild(link);
             link.click();
-            document.body.removeChild(link);
             document.body.removeChild(link);
 
             analytics.track('certificate_downloaded', {
@@ -246,12 +314,14 @@ const PaymentSuccessPage = () => {
         }
     };
 
-    if (isLoading) {
+    if (isLoading || isGeneratingCertificates) {
         return (
             <div className="min-h-screen text-white font-sans flex items-center justify-center" style={{ background: 'radial-gradient(50% 50% at 50% 50%, #00385C 0%, #001C2C 100%)' }}>
                 <div className="text-center">
                     <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#98D048] mx-auto mb-4"></div>
-                    <p className="text-gray-300">Verifying payment...</p>
+                    <p className="text-gray-300">
+                        {isGeneratingCertificates ? certificateGenerationStatus || 'Generating your certificates...' : 'Verifying payment...'}
+                    </p>
                 </div>
             </div>
         );
@@ -347,6 +417,23 @@ const PaymentSuccessPage = () => {
                                                 <div className="flex-1 min-w-0">
                                                     <h3 className="text-lg font-bold text-white mb-1">{item.certification_name}</h3>
                                                     <p className="text-[#98D048] font-medium text-sm">{item.skill_name}</p>
+                                                    {/* Show certificate status if available */}
+                                                    {(item as any).status && (
+                                                        <p className="text-xs text-gray-400 mt-1">
+                                                            Status: {(item as any).status === 'generated' ? 'Ready' : 
+                                                                    (item as any).status === 'pending' ? 'Processing' : 'Failed'}
+                                                            {/* Show expiry info for generated certificates */}
+                                                            {(item as any).status === 'generated' && (item as any).certificate_expires_at && (
+                                                                <span className="ml-2">
+                                                                    • Expires {new Date((item as any).certificate_expires_at).toLocaleDateString()}
+                                                                </span>
+                                                            )}
+                                                            {/* Show if image expired */}
+                                                            {(item as any).image_expired && (
+                                                                <span className="ml-2 text-yellow-400">• Image expired, regenerating...</span>
+                                                            )}
+                                                        </p>
+                                                    )}
                                                 </div>
                                             </div>
 

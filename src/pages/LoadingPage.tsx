@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import TopBar from '../components/TopBar';
+import { getStoredSessionId } from '../utils/localStorage';
 
 const LoadingPage = () => {
     const [currentStep, setCurrentStep] = useState(0);
@@ -70,7 +71,10 @@ const LoadingPage = () => {
 
         // Auto-navigate to assessment after loading completes
         const navigationTimeout = setTimeout(() => {
-            const assessmentId = `assessment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+            // Use the real session ID if available, otherwise fallback to mock for safety
+            const realSessionId = getStoredSessionId();
+            const assessmentId = realSessionId || `assessment_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
             // Handle empty certs gracefully
             const certsParam = selectedCerts.current.length > 0 ? `&certs=${selectedCerts.current.join(',')}` : '';
             const targetUrl = `/assessment?id=${assessmentId}${certsParam}`;

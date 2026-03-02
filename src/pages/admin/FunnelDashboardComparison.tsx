@@ -103,11 +103,11 @@ const FunnelDashboardComparison = () => {
             sessionQuery = sessionQuery.ilike('utm_medium', `%${utmMedium}%`);
         }
 
-        const { data: sessionData, count: sessionCount, error: sessionError } = await sessionQuery.select('session_id');
+        const { data: sessionData, count: sessionCount, error: sessionError } = await sessionQuery.select('id');
 
         if (sessionError) throw sessionError;
 
-        const matchingSessionIds = sessionData?.map(s => s.session_id) || [];
+        const matchingSessionIds = sessionData?.map(s => s.id.toString()) || []; // Convert to strings for tracking_events queries
         const hasActiveFilters = utmSource || utmMedium;
 
         if (hasActiveFilters && matchingSessionIds.length === 0) {
@@ -126,7 +126,7 @@ const FunnelDashboardComparison = () => {
         const getUniqueSessionCount = async (eventName: string, filterFn?: (evt: any) => boolean) => {
             let query = supabase
                 .from('tracking_events')
-                .select('session_id, properties')
+                .select('session_id, event_data')
                 .eq('event_name', eventName);
 
             if (hasActiveFilters) {
@@ -159,13 +159,18 @@ const FunnelDashboardComparison = () => {
         };
 
         const getPassedCount = async () => {
+            // Query user_assessments table for sessions with is_passed = true
             let query = supabase
-                .from('sessions')
-                .select('*', { count: 'exact', head: true })
-                .eq('passed', true);
+                .from('user_assessments')
+                .select('session_id', { count: 'exact', head: true })
+                .eq('is_passed', true);
 
-            if (utmSource) query = query.ilike('utm_source', `%${utmSource}%`);
-            if (utmMedium) query = query.ilike('utm_medium', `%${utmMedium}%`);
+            // If we have filtered session IDs, only count those
+            if (hasActiveFilters) {
+                // Convert matchingSessionIds back to numbers for user_assessments.session_id (bigint)
+                const sessionIdNumbers = matchingSessionIds.map(id => parseInt(id, 10));
+                query = query.in('session_id', sessionIdNumbers);
+            }
 
             const { count } = await query;
             return count || 0;
@@ -181,7 +186,7 @@ const FunnelDashboardComparison = () => {
             paidCount
         ] = await Promise.all([
             getUniqueSessionCount('click_begin_assessment'),
-            getUniqueSessionCount('phase_started', (e) => e.properties?.phase_number === 1),
+            getUniqueSessionCount('phase_started', (e) => e.event_data?.phase_number === 1),
             getUniqueSessionCount('assessment_completed'),
             getPassedCount(),
             getContactCount(),
@@ -207,15 +212,24 @@ const FunnelDashboardComparison = () => {
             return { ...step, conversion: Number(conv) };
         });
 
-        // Payment Analytics
+        // Payment Analytics - Query orders table for actual payment data
         let paymentQuery = supabase
-            .from('sessions')
-            .select('amount_paid, is_paid, payment_id')
-            .eq('is_paid', true)
-            .not('amount_paid', 'is', null);
+            .from('orders')
+            .select(`
+                amount, 
+                status,
+                razorpay_payment_id,
+                sessions!inner(
+                    id,
+                    utm_source,
+                    utm_medium
+                )
+            `)
+            .eq('status', 'paid')
+            .not('amount', 'is', null);
 
-        if (utmSource) paymentQuery = paymentQuery.ilike('utm_source', `%${utmSource}%`);
-        if (utmMedium) paymentQuery = paymentQuery.ilike('utm_medium', `%${utmMedium}%`);
+        if (utmSource) paymentQuery = paymentQuery.ilike('sessions.utm_source', `%${utmSource}%`);
+        if (utmMedium) paymentQuery = paymentQuery.ilike('sessions.utm_medium', `%${utmMedium}%`);
 
         const { data: paymentData } = await paymentQuery;
 
@@ -228,7 +242,7 @@ const FunnelDashboardComparison = () => {
 
         if (paymentData) {
             const successfulPayments = paymentData.length;
-            const totalRevenue = paymentData.reduce((sum, session) => sum + (session.amount_paid || 0), 0);
+            const totalRevenue = paymentData.reduce((sum, order) => sum + parseFloat(order.amount || '0'), 0);
             const averageOrderValue = successfulPayments > 0 ? totalRevenue / successfulPayments : 0;
 
             paymentAnalytics = {

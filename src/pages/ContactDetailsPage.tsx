@@ -4,12 +4,27 @@ import TopBar from '../components/TopBar';
 import { countryCodes } from '../constants/countryCodes';
 import { analytics } from '../services/analytics';
 import { storeContactDetails, getUserEmail, getStoredSessionId } from '../utils/localStorage';
-import { checkCertifiedUser, signupUser, updateSessionUser } from '../services/api';
+import {
+    checkCertifiedUser,
+    signupUser,
+    updateSessionUser,
+    getSessionDetails,
+    getRoleCommunitySize
+} from '../services/api';
 
 const ContactDetailsPage = () => {
     const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const assessmentId = searchParams.get('id');
+    const sessionIdParam = searchParams.get('session_id');
+
+    // Helper function to build results URL with all available parameters
+    const buildResultsUrl = () => {
+        const params = new URLSearchParams();
+        if (assessmentId) params.append('id', assessmentId);
+        if (sessionIdParam) params.append('session_id', sessionIdParam);
+        return `/results-v3?${params.toString()}`;
+    };
 
     // Available profile images
     const profileImages = [
@@ -32,15 +47,40 @@ const ContactDetailsPage = () => {
         name: ''
     });
     const [countryCode, setCountryCode] = useState('+91');
-    const [roleName] = useState('HR Manager'); // Static default
+    const [roleName, setRoleName] = useState(''); // Dynamic role name
+    const [communitySize, setCommunitySize] = useState(2847); // Dynamic community size
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isCheckingUser, setIsCheckingUser] = useState(true);
 
     // Track page view and check user
     useEffect(() => {
+        // Register session if available
+        const currentSessionId = getStoredSessionId();
+        if (currentSessionId) {
+            analytics.register({ session_id: currentSessionId });
+            analytics.setSessionId(currentSessionId);
+            
+            if (import.meta.env.DEV) {
+                console.log('[ContactDetailsPage] 📝 Registered session with analytics:', currentSessionId.slice(0, 8) + '...');
+            }
+        }
+        
         analytics.track('view_contact_details');
 
-        const checkExistingUser = async () => {
+        const checkExistingUserAndFetchDetails = async () => {
+            // Fetch session details if we have an assessmentId
+            if (assessmentId) {
+                const sessionDetails = await getSessionDetails(assessmentId);
+                if (sessionDetails?.role) {
+                    setRoleName(sessionDetails.role);
+                    const size = await getRoleCommunitySize(sessionDetails.role);
+                    setCommunitySize(size);
+                }
+            } else {
+                // Fallback for direct navigation without ID
+                setRoleName('Professional');
+            }
+
             const storedEmail = getUserEmail();
 
             if (storedEmail) {
@@ -55,31 +95,29 @@ const ContactDetailsPage = () => {
                         // EXISTING USER - Skip form flow
                         console.log('Existing user found, skipping form:', userData);
 
-                        // Save user data locally
-                        storeContactDetails({
-                            email: userData.email, // Use standardized fields
+                        // ✨ User is recognized from external system (e.g. Xano)
+                        // We must ensure they have a record in our local Supabase 'users' table too
+                        const signupRes = await signupUser({
                             name: userData.name,
+                            email: userData.email,
                             phone: userData.phone_number
                         });
 
-                        // Track in analytics
-                        analytics.identify(userData.email);
-                        analytics.peopleSet({
-                            $name: userData.name,
-                            $email: userData.email,
-                            $phone: userData.phone_number,
-                            user_type: 'existing'
-                        });
+                        const userId = signupRes?.data?.id;
+                        const currentSessionId = assessmentId || getStoredSessionId();
 
-                        // SKIP Signup API call as requested
-                        // BUT: We MUST link this existing user to the current session for analytics
-                        const currentSessionId = getStoredSessionId();
-                        if (currentSessionId && userData.id) {
-                            await updateSessionUser(currentSessionId, userData.id, userData.email);
+                        if (currentSessionId && userId) {
+                            console.log('Linking recognized user to session:', userId);
+                            await updateSessionUser(currentSessionId, userId);
                         }
 
+                        // Store consistency in local storage
+                        localStorage.setItem('userEmail', userData.email);
+                        localStorage.setItem('userName', userData.name);
+                        localStorage.setItem('userPhone', userData.phone_number);
+
                         // Proceed directly to results
-                        navigate(`/results-v3?id=${assessmentId || ''}`);
+                        navigate(buildResultsUrl());
                         return;
                     }
                 } catch (error) {
@@ -91,22 +129,20 @@ const ContactDetailsPage = () => {
             setIsCheckingUser(false);
         };
 
-        checkExistingUser();
+        checkExistingUserAndFetchDetails();
     }, [assessmentId, navigate]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
 
         if (!contactDetails.email || !contactDetails.name) {
-            // Simple validation
             return;
         }
 
         setIsSubmitting(true);
 
         try {
-            // 1. Signup/Identify User
-            // We call signup even if mocked to get a User ID
+            // 1. Signup/Upsert User in Supabase
             const signupRes = await signupUser({
                 name: contactDetails.name,
                 email: contactDetails.email,
@@ -115,28 +151,20 @@ const ContactDetailsPage = () => {
             });
 
             // 2. Link User to Session
-            const currentSessionId = getStoredSessionId();
-            // Use ID from signup response or fallback mock ID 123
-            const userId = signupRes?.data?.id || 123;
+            const currentSessionId = assessmentId || getStoredSessionId();
+            const userId = signupRes?.data?.id;
 
-            if (currentSessionId) {
-                await updateSessionUser(currentSessionId, userId, contactDetails.email);
+            if (currentSessionId && userId) {
+                console.log('Linking new user to session:', userId);
+                await updateSessionUser(currentSessionId, userId);
             }
 
-        } catch (e) {
-            console.error('Signup/Link flow failed', e);
-            // Proceed anyway to not block user
-        }
-
-        // Simulate short delay for UX
-        setTimeout(() => {
-            // Store contact details via consistent helper
+            // 3. Store contact details locally
             storeContactDetails({
                 email: contactDetails.email,
                 name: contactDetails.name,
                 phone: `${countryCode}${contactDetails.phone}`
             });
-            // Also store individual keys for legacy compatibility/debugging
             localStorage.setItem('userEmail', contactDetails.email);
             localStorage.setItem('userName', contactDetails.name);
             localStorage.setItem('userPhone', `${countryCode}${contactDetails.phone}`);
@@ -147,9 +175,15 @@ const ContactDetailsPage = () => {
                 role: roleName
             });
 
-            // Navigate to results
-            navigate('/results-v3');
-        }, 800);
+            // 4. Finally Navigate
+            navigate(buildResultsUrl());
+
+        } catch (e) {
+            console.error('Signup/Link flow failed', e);
+            // Re-enable button so user can try again or we can show an error
+            setIsSubmitting(false);
+            alert('There was a problem saving your details. Please try again or contact support.');
+        }
     };
 
     if (isCheckingUser) {
@@ -181,7 +215,7 @@ const ContactDetailsPage = () => {
                             Your Report is Ready
                         </h1>
                         <p className="text-gray-300 text-lg">
-                            Please provide your contact details to receive your personalized {roleName || 'HR'} Strategic Assessment report.
+                            Please provide your contact details to receive your personalized {roleName} Strategic Assessment report.
                         </p>
                     </div>
 
@@ -291,7 +325,7 @@ const ContactDetailsPage = () => {
                                         />
                                     ))}
                                 </div>
-                                <span>Join 2,847+ HR leaders</span>
+                                <span>Join {communitySize.toLocaleString()}+ {roleName} leaders</span>
                             </div>
                         </div>
                     </div>

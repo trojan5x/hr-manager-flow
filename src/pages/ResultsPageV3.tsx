@@ -13,7 +13,7 @@ import AwardsSection from '../components/AwardsSection';
 import LinkedInTestimonialsSection from '../components/LinkedInTestimonialsSection';
 import VideoTestimonialsSection from '../components/VideoTestimonialsSection';
 import { MOCK_ASSESSMENT } from '../data/staticData';
-import { fetchBundleProducts, checkPaymentStatus, createPaymentOrder } from '../services/api';
+import { fetchBundleProducts, checkPaymentStatus, createPaymentOrder, getCertificatesByRole } from '../services/api';
 import SocialProofSection from '../components/SocialProofSection';
 import ComparisonTable from '../components/ComparisonTable';
 import { getStoredSessionId, getStoredBundleId, getUserName, getStoredRole, getStoredProgressBackup } from '../utils/localStorage';
@@ -44,8 +44,8 @@ const ResultsPageV3 = () => {
     // Bundle State
     const [bundleData, setBundleData] = useState<BundleProductData | null>(null);
 
-    // Get IDs from URL or localStorage
-    const sessionIdParam = searchParams.get('session_id');
+    // Get IDs from URL or localStorage - try different parameter names
+    const sessionIdParam = searchParams.get('session_id') || searchParams.get('session') || searchParams.get('id');
     const storedSessionId = getStoredSessionId();
     // Keep as string for UUID compatibility
     const sessionId = sessionIdParam || storedSessionId;
@@ -60,6 +60,17 @@ const ResultsPageV3 = () => {
 
     // Track results page view
     useEffect(() => {
+        // Register session if available
+        const currentSessionId = getStoredSessionId();
+        if (currentSessionId) {
+            analytics.register({ session_id: currentSessionId });
+            analytics.setSessionId(currentSessionId);
+            
+            if (import.meta.env.DEV) {
+                console.log('[ResultsPageV3] 📝 Registered session with analytics:', currentSessionId.slice(0, 8) + '...');
+            }
+        }
+        
         if (!isLoading && score !== null) {
             analytics.track('view_results_page', {
                 score,
@@ -84,38 +95,198 @@ const ResultsPageV3 = () => {
             if (isMounted) setIsLoading(true);
 
             try {
-                // --- LOCAL SCORING LOGIC START ---
-                console.log('RESULTS_V3: Starting local score calculation...');
+                // --- DATABASE-FIRST SCORING LOGIC START ---
+                console.log(`RESULTS_V3: Starting database-first score calculation...`);
 
-                const answersMap = new Map<number, Map<number, any>>();
-                const allStorageKeys = Object.keys(localStorage);
-                const phaseDataKeys = allStorageKeys.filter(k => k.match(/assessment_.*_phase_\d+_data/));
+                // Get session ID from URL or localStorage
+                const currentSessionId = sessionId || getStoredSessionId();
+                if (!currentSessionId) {
+                    throw new Error('No session ID found for results');
+                }
 
-                phaseDataKeys.forEach(key => {
-                    try {
-                        const data = JSON.parse(localStorage.getItem(key) || '{}');
-                        let scenarioId = parseInt(data.scenario_id, 10);
-                        if (isNaN(scenarioId)) scenarioId = parseInt(data.phase_number, 10);
+                console.log('RESULTS_V3: Using session ID:', currentSessionId);
+                
+                // Try to fetch assessment data from database first
+                let userAssessmentData: any = null;
+                let answersMap = new Map<number, Map<number, any>>();
+                let hasDbData = false;
 
-                        if (!isNaN(scenarioId) && data.phase_user_answers) {
-                            const currentMap = answersMap.get(scenarioId) || new Map<number, any>();
-                            data.phase_user_answers.forEach((ans: any) => {
-                                currentMap.set(parseInt(ans.question_id, 10), ans);
+                try {
+                    console.log('RESULTS_V3: Attempting to fetch data from database...');
+                    const { getUserAssessmentBySession } = await import('../services/api');
+                    const assessmentResponse = await getUserAssessmentBySession(parseInt(currentSessionId));
+                    
+                    if (assessmentResponse.result === 'success' && assessmentResponse.data) {
+                        userAssessmentData = assessmentResponse.data;
+                        hasDbData = true;
+                        console.log('RESULTS_V3: Found assessment data in database:', userAssessmentData);
+
+                        // Convert database user_answers to answersMap format
+                        if (userAssessmentData.user_answers) {
+                            Object.keys(userAssessmentData.user_answers).forEach(phaseKey => {
+                                const phaseNum = parseInt(phaseKey);
+                                const phaseAnswers = userAssessmentData.user_answers[phaseKey];
+                                const currentMap = new Map<number, any>();
+                                
+                                Object.keys(phaseAnswers).forEach(questionIdKey => {
+                                    const questionId = parseInt(questionIdKey);
+                                    const answerValue = phaseAnswers[questionIdKey];
+                                    // Convert string answer to object format expected by scoring logic
+                                    const answerData = typeof answerValue === 'string' 
+                                        ? { selected_option: answerValue }
+                                        : answerValue;
+                                    currentMap.set(questionId, answerData);
+                                });
+                                
+                                answersMap.set(phaseNum, currentMap);
                             });
-                            answersMap.set(scenarioId, currentMap);
+                            console.log('RESULTS_V3: Converted database answers to map:', answersMap);
                         }
-                    } catch (e) {
-                        console.warn('Error parsing key', key);
                     }
-                });
+                } catch (dbError) {
+                    console.warn('RESULTS_V3: Failed to fetch from database, trying localStorage...', dbError);
+                }
 
-                // Calculate Score
+                // Fallback to localStorage if no database data
+                if (!hasDbData) {
+                    console.log('RESULTS_V3: No database data found, trying localStorage...');
+                    
+                    const allStorageKeys = Object.keys(localStorage);
+                    const phaseDataKeys = allStorageKeys.filter(k => k.match(/assessment_.*_phase_\d+_data/));
+
+                    console.log('RESULTS_V3: Found phase data keys in localStorage:', phaseDataKeys);
+
+                    phaseDataKeys.forEach(key => {
+                        try {
+                            const data = JSON.parse(localStorage.getItem(key) || '{}');
+                            console.log(`RESULTS_V3: Phase data for ${key}:`, data);
+                            let scenarioId = parseInt(data.scenario_id, 10);
+                            if (isNaN(scenarioId)) scenarioId = parseInt(data.phase_number, 10);
+
+                            if (!isNaN(scenarioId) && data.phase_user_answers) {
+                                console.log(`RESULTS_V3: Processing scenario ${scenarioId} with answers:`, data.phase_user_answers);
+                                const currentMap = answersMap.get(scenarioId) || new Map<number, any>();
+                                data.phase_user_answers.forEach((ans: any) => {
+                                    currentMap.set(parseInt(ans.question_id, 10), ans);
+                                });
+                                answersMap.set(scenarioId, currentMap);
+                            }
+                        } catch (e) {
+                            console.warn('Error parsing key', key);
+                        }
+                    });
+                }
+
+                console.log('RESULTS_V3: Final answers map:', answersMap);
+
+                // Skip early return - always do full calculation for complete data
+                // (We'll use database data as source but calculate all the detailed metrics)
+
+                // Calculate Score using real scenario data
                 let correctCount = 0;
                 let totalQuestions = 0;
                 const scoreBreakdown: any[] = [];
                 const answerSheet: any[] = [];
 
-                MOCK_ASSESSMENT.data.scenarios.forEach((scenario, index) => {
+                // Fetch real scenarios from API instead of using mock data
+                try {
+                    const currentSessionId = sessionId || getStoredSessionId();
+                    if (!currentSessionId) {
+                        throw new Error('No session ID found for scoring');
+                    }
+
+                    console.log('RESULTS_V3: Fetching scenarios for session:', currentSessionId);
+                    
+                    // Import the fetchBundleScenarios function
+                    const { fetchBundleScenarios } = await import('../services/api');
+                    const scenariosResponse = await fetchBundleScenarios(currentSessionId);
+                    
+                    if (!scenariosResponse.success || !scenariosResponse.data?.scenarios) {
+                        throw new Error('Failed to fetch scenarios for scoring');
+                    }
+
+                    const realScenarios = scenariosResponse.data.scenarios;
+                    console.log('RESULTS_V3: Using real scenarios for scoring:', realScenarios);
+
+                    console.log('RESULTS_V3: Real scenarios scenario_ids:', realScenarios.map(s => s.scenario_id));
+                    console.log('RESULTS_V3: Answers map keys:', Array.from(answersMap.keys()));
+
+                    realScenarios.forEach((scenario, index) => {
+                        let phaseCorrect = 0;
+                        let phaseTotal = scenario.questions?.length || 0;
+                        const scenarioId = Number(scenario.scenario_id);
+                        
+                        // Try to find answers by scenario_id first, then by phase index
+                        let scenarioAnswers = answersMap.get(scenarioId);
+                        if (!scenarioAnswers || scenarioAnswers.size === 0) {
+                            // Try using phase index (1-based)
+                            scenarioAnswers = answersMap.get(index + 1);
+                            console.log(`RESULTS_V3: No answers for scenario_id ${scenarioId}, trying phase index ${index + 1}`);
+                        }
+
+                        console.log(`RESULTS_V3: Processing scenario ${scenarioId} (phase ${index + 1}) with ${phaseTotal} questions`);
+                        console.log(`RESULTS_V3: Scenario answers:`, scenarioAnswers);
+
+                        scenario.questions?.forEach((q: any) => {
+                            totalQuestions++;
+                            const qId = Number(q.question_id);
+                            let isCorrect = false;
+                            let userSelectedOption = '-';
+                            let correctOptionId = '-';
+
+                            // Find Correct Option
+                            const correctRef = q.options?.find((o: any) => o.is_correct);
+                            if (correctRef) correctOptionId = correctRef.option_id;
+
+                            // Check User Answer
+                            if (scenarioAnswers && scenarioAnswers.has(qId)) {
+                                const userAns = scenarioAnswers.get(qId);
+                                userSelectedOption = userAns.selected_option;
+
+                                console.log(`RESULTS_V3: Q${qId} - User: "${userSelectedOption}", Correct: "${correctOptionId}"`);
+
+                                // Normalize & Compare
+                                const normUser = String(userSelectedOption).trim().toLowerCase();
+                                const normRef = String(correctOptionId).trim().toLowerCase();
+                                console.log(`RESULTS_V3: Q${qId} - Normalized - User: "${normUser}", Correct: "${normRef}"`);
+                                if (normUser === normRef) {
+                                    isCorrect = true;
+                                    phaseCorrect++;
+                                    console.log(`RESULTS_V3: Q${qId} - CORRECT!`);
+                                } else {
+                                    console.log(`RESULTS_V3: Q${qId} - Wrong answer`);
+                                }
+                            } else {
+                                console.log(`RESULTS_V3: Q${qId} - No user answer found`);
+                            }
+
+                            // Use legacy fallback if needed (omitted for strict local logic unless requested)
+
+                            answerSheet.push({
+                                question: q.question_text,
+                                is_correct: isCorrect,
+                                users_answer: userSelectedOption,
+                                correct_answer: correctOptionId
+                            });
+                        });
+
+                        correctCount += phaseCorrect;
+
+                        scoreBreakdown.push({
+                            phase_name: scenario.phase || 'Unknown Phase',
+                            phase_score: phaseTotal > 0 ? Math.round((phaseCorrect / phaseTotal) * 100) : 0,
+                            phase_number: index + 1,
+                            phase_correct_answers: phaseCorrect,
+                            phase_total_questions: phaseTotal,
+                            skill_name: scenario.phase || scenario.scenario_name // Validated user request
+                        });
+                    });
+
+                } catch (scenarioError) {
+                    console.error('RESULTS_V3: Failed to fetch real scenarios, falling back to mock data:', scenarioError);
+                    
+                    // Fallback to mock data if real scenarios fail
+                    MOCK_ASSESSMENT.data.scenarios.forEach((scenario, index) => {
                     let phaseCorrect = 0;
                     let phaseTotal = scenario.questions?.length || 0;
                     const scenarioId = Number(scenario.scenario_id);
@@ -137,13 +308,21 @@ const ResultsPageV3 = () => {
                             const userAns = scenarioAnswers.get(qId);
                             userSelectedOption = userAns.selected_option;
 
+                            console.log(`RESULTS_V3: Q${qId} - User: "${userSelectedOption}", Correct: "${correctOptionId}"`);
+
                             // Normalize & Compare
                             const normUser = String(userSelectedOption).trim().toLowerCase();
                             const normRef = String(correctOptionId).trim().toLowerCase();
+                            console.log(`RESULTS_V3: Q${qId} - Normalized - User: "${normUser}", Correct: "${normRef}"`);
                             if (normUser === normRef) {
                                 isCorrect = true;
                                 phaseCorrect++;
+                                console.log(`RESULTS_V3: Q${qId} - CORRECT!`);
+                            } else {
+                                console.log(`RESULTS_V3: Q${qId} - Wrong answer`);
                             }
+                        } else {
+                            console.log(`RESULTS_V3: Q${qId} - No user answer found`);
                         }
 
                         // Use legacy fallback if needed (omitted for strict local logic unless requested)
@@ -166,13 +345,22 @@ const ResultsPageV3 = () => {
                         phase_total_questions: phaseTotal,
                         skill_name: scenario.phase || scenario.scenario_name // Validated user request
                     });
-                });
+                    });
+                }
 
                 console.log(`RESULTS_V3: Calculated Score: ${correctCount}/${totalQuestions}`);
+                console.log('RESULTS_V3: Score breakdown:', scoreBreakdown);
 
-                // Get time taken from progress backup
-                const progressBackup = bundleId ? getStoredProgressBackup(bundleId) : null;
-                const timeTaken = progressBackup?.cumulativeTime || 300;
+                // Get time taken - prioritize database data if available
+                let timeTaken = 300; // default fallback
+                if (hasDbData && userAssessmentData?.time_taken) {
+                    timeTaken = userAssessmentData.time_taken;
+                    console.log('RESULTS_V3: Using database time_taken:', timeTaken);
+                } else {
+                    const progressBackup = bundleId ? getStoredProgressBackup(bundleId) : null;
+                    timeTaken = progressBackup?.cumulativeTime || 300;
+                    console.log('RESULTS_V3: Using localStorage time_taken:', timeTaken);
+                }
 
                 const finalReportData: AssessmentReportData = {
                     id: 999,
@@ -196,19 +384,102 @@ const ResultsPageV3 = () => {
                     setScore(totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0);
                     setIsLoading(false);
 
-                    // Update Supabase Session
+                    // Create/Update User Assessment Record
                     if (sessionId) {
+                        console.log('ASSESSMENT_SAVE: Starting to save assessment for session:', sessionId);
                         const finalScore = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
-                        supabase.from('sessions')
-                            .update({
-                                score: finalScore,
-                                passed: finalScore >= 50
-                            })
-                            .eq('session_id', sessionId)
-                            .then(({ error }) => {
-                                if (error) console.error('Failed to save score to session:', error);
-                                else console.log('Score saved to session:', finalScore);
+                        const isPassed = finalScore >= 50;
+                        console.log('ASSESSMENT_SAVE: Calculated score:', finalScore, 'Passed:', isPassed);
+
+                        // First, get session details to find user_id
+                        const { data: sessionData, error: sessionError } = await supabase
+                            .from('sessions')
+                            .select('user_id, role')
+                            .eq('id', sessionId)
+                            .single();
+
+                        console.log('ASSESSMENT_SAVE: Session data:', sessionData, 'Error:', sessionError);
+
+                        if (sessionData?.user_id) {
+                            // Get role_id from role name
+                            const { data: roleData, error: roleError } = await supabase
+                                .from('roles')
+                                .select('id')
+                                .eq('role_name', sessionData.role || 'HR Manager')
+                                .single();
+
+                            console.log('ASSESSMENT_SAVE: Role data:', roleData, 'Error:', roleError);
+
+                            // Get assessment_id
+                            const { data: assessmentData, error: assessmentError } = await supabase
+                                .from('assessments')
+                                .select('id')
+                                .eq('role_id', roleData?.id || 37)
+                                .single();
+
+                            console.log('ASSESSMENT_SAVE: Assessment data:', assessmentData, 'Error:', assessmentError);
+
+                            // Convert answersMap to a simple object for storage
+                            const userAnswersObj: any = {};
+                            answersMap.forEach((phaseAnswers, phaseId) => {
+                                userAnswersObj[phaseId] = {};
+                                phaseAnswers.forEach((answer, questionId) => {
+                                    userAnswersObj[phaseId][questionId] = answer;
+                                });
                             });
+
+                            console.log('ASSESSMENT_SAVE: User answers object:', userAnswersObj);
+
+                            // Create or update user assessment
+                            const assessmentRecord = {
+                                session_id: parseInt(sessionId),
+                                user_id: sessionData.user_id,
+                                role_id: roleData?.id || 37,
+                                assessment_id: assessmentData?.id || 22,
+                                score: finalScore,
+                                is_passed: isPassed,
+                                is_complete: true,
+                                user_answers: userAnswersObj,
+                                time_taken: timeTaken || 300 // use the timeTaken variable from progress backup
+                            };
+
+                            console.log('ASSESSMENT_SAVE: Assessment record to save:', assessmentRecord);
+
+                            // Check if assessment already exists for this session
+                            const { data: existingAssessment } = await supabase
+                                .from('user_assessments')
+                                .select('id')
+                                .eq('session_id', parseInt(sessionId))
+                                .single();
+
+                            console.log('ASSESSMENT_SAVE: Existing assessment:', existingAssessment);
+
+                            let error;
+                            if (existingAssessment) {
+                                // Update existing assessment
+                                console.log('ASSESSMENT_SAVE: Updating existing assessment');
+                                ({ error } = await supabase
+                                    .from('user_assessments')
+                                    .update(assessmentRecord)
+                                    .eq('id', existingAssessment.id));
+                            } else {
+                                // Insert new assessment
+                                console.log('ASSESSMENT_SAVE: Inserting new assessment');
+                                ({ error } = await supabase
+                                    .from('user_assessments')
+                                    .insert(assessmentRecord));
+                            }
+
+                            if (error) {
+                                console.error('ASSESSMENT_SAVE: Failed to save assessment:', error);
+                            } else {
+                                console.log('ASSESSMENT_SAVE: Assessment saved successfully!', finalScore, isPassed);
+                            }
+                        } else {
+                            console.warn('ASSESSMENT_SAVE: No user_id found in session data');
+                        }
+                    } else {
+                        console.warn('ASSESSMENT_SAVE: No sessionId available');
                     }
                 }
                 // --- LOCAL SCORING LOGIC END ---
@@ -256,67 +527,171 @@ const ResultsPageV3 = () => {
         };
     }, [score]); // Re-run when score changes (in case section appears/disappears)
 
-    // Fetch Bundle Products
+    // Fetch Certificates by Role
     useEffect(() => {
-        const loadBundleProducts = async () => {
-            if (!bundleId) {
-                console.warn('No bundle ID found for products.');
-                return;
-            }
-
+        const loadCertificates = async () => {
+            console.log('RESULTS_V3: Starting certificate loading...');
             try {
-                const response = await fetchBundleProducts(bundleId);
-
-                // Enrich certifications with preview images from stored role content
-                let enrichedCertifications = response.data.certifications;
-                try {
-                    const storedRoleContent = localStorage.getItem('roleContent');
-                    if (storedRoleContent) {
-                        const parsedContent = JSON.parse(storedRoleContent);
-                        const roleSkills = parsedContent?.data?.role?.skills || [];
-
-                        // Create lookup map for efficiency
-                        const skillImageMap = new Map();
-                        roleSkills.forEach((skill: any) => {
-                            // Check both possible field names
-                            const imageUrl = skill.skill_certificate_preview_image_link || skill.certificate_preview_url;
-                            if (imageUrl) {
-                                // Use skill_id if available (matches cert.skill_id), fallback to id
-                                const key = skill.skill_id || skill.id;
-                                skillImageMap.set(key, imageUrl);
-                            }
-                        });
-
-                        if (skillImageMap.size > 0) {
-                            enrichedCertifications = response.data.certifications.map(cert => ({
-                                ...cert,
-                                certificate_preview_url: skillImageMap.get(cert.skill_id) || cert.certificate_preview_url
-                            }));
-                        }
+                // Get role information from the session
+                const currentSessionId = sessionId || getStoredSessionId();
+                if (!currentSessionId) {
+                    console.warn('No session ID found for certificates, using fallback.');
+                    // Use fallback bundle loading
+                    if (bundleId) {
+                        const response = await fetchBundleProducts(bundleId);
+                        setBundleData(response.data);
+                        console.log('RESULTS_V3: Using fallback bundle data');
                     }
-                } catch (e) {
-                    console.warn('Failed to enrich certifications with stored images:', e);
+                    return;
                 }
 
-                setBundleData({
-                    ...response.data,
-                    certifications: enrichedCertifications
-                });
+                console.log('RESULTS_V3: Using session ID:', currentSessionId);
+
+                // Get role information from session
+                const { data: sessionData, error: sessionError } = await supabase
+                    .from('sessions')
+                    .select('role')
+                    .eq('id', currentSessionId)
+                    .single();
+
+                if (sessionError) {
+                    console.warn('RESULTS_V3: Session query error:', sessionError);
+                }
+
+                const roleName = sessionData?.role || derivedRole || 'HR Manager';
+                console.log('RESULTS_V3: Loading certificates for role:', roleName);
+
+                // Get role ID from role name
+                const { data: roleData, error: roleError } = await supabase
+                    .from('roles')
+                    .select('id')
+                    .eq('role_name', roleName)
+                    .single();
+
+                if (roleError) {
+                    console.warn('RESULTS_V3: Role query error:', roleError);
+                }
+
+                const roleId = roleData?.id || 37; // fallback to known HR Manager role ID
+                console.log('RESULTS_V3: Using role ID:', roleId);
+
+                // Fetch certificates for this role
+                const response = await getCertificatesByRole(roleId);
+                console.log('RESULTS_V3: getCertificatesByRole response:', response);
+                
+                if (response.result === 'success' && response.data && response.data.length > 0) {
+                    const certificates = response.data;
+                    console.log('RESULTS_V3: Fetched certificates from DB:', certificates);
+                    console.log('RESULTS_V3: Certificate IDs:', certificates.map(c => c.id));
+                    console.log('RESULTS_V3: Certificate types:', certificates.map(c => `${c.id}:${c.type}`));
+
+                    // Transform database certificates to match the expected format
+                    const transformedCertifications = certificates.map((cert: any) => {
+                        // 🧪 TESTING OVERRIDE: Set all prices to ₹1 for testing
+                        const isTestingMode = false; // Set to false to disable testing prices
+                        
+                        return {
+                            skill_id: cert.id,
+                            role_id: roleId, // Include role_id for order tracking
+                            certification_name: cert.certificate_name || cert.name,
+                            certification_name_short: cert.short_name,
+                            cert_id_prefix: cert.cert_id_prefix,
+                            skill_description: cert.description || '', // Required field
+                            type: cert.type,
+                            order_index: cert.order_index,
+                            certificate_preview_url: cert.preview_image,
+                            description: cert.description,
+                            price: isTestingMode ? 1 : (parseFloat(cert.price) || 0), // ₹1 for testing
+                            original_price: isTestingMode ? 2 : (parseFloat(cert.original_price) || 0), // ₹2 for testing
+                            badge: cert.badge,
+                            skill_frameworks: cert.skill_frameworks || []
+                        };
+                    });
+
+                    console.log('RESULTS_V3: Transformed certificates:', transformedCertifications);
+
+                    // Create bundle data structure
+                    const bundleData = {
+                        bundle_name: `Executive ${roleName} Bundle`,
+                        certifications: transformedCertifications,
+                        bundle_price: transformedCertifications.reduce((sum: number, cert: any) => sum + (cert.price || 0), 0),
+                        bundle_original_price: transformedCertifications.reduce((sum: number, cert: any) => sum + (cert.original_price || 0), 0),
+                        product_cost: transformedCertifications.reduce((sum: number, cert: any) => sum + (cert.price || 0), 0) // Required field
+                    };
+
+                    console.log('RESULTS_V3: Final bundle data structure:', bundleData);
+                    setBundleData(bundleData);
+                    console.log('RESULTS_V3: Bundle data set successfully:', bundleData);
+                } else {
+                    console.warn('RESULTS_V3: No certificates found for role:', roleName, 'roleId:', roleId);
+                    console.warn('RESULTS_V3: Response was:', response);
+                    throw new Error(`No certificates found for role: ${roleName} (ID: ${roleId})`);
+                }
+
             } catch (err) {
-                console.error('Failed to load bundle products:', err);
-                // Don't show error, just use fallback
+                console.error('RESULTS_V3: Failed to load certificates:', err);
+                console.log('RESULTS_V3: Error details:', (err as Error).message || err);
+                
+                // Fallback to the original bundle loading if role-based loading fails
+                try {
+                    console.log('RESULTS_V3: Attempting fallback to bundle loading...');
+                    if (bundleId) {
+                        console.log('RESULTS_V3: Using bundle ID:', bundleId);
+                        const response = await fetchBundleProducts(bundleId);
+                        console.log('RESULTS_V3: Fallback bundle response:', response);
+                        setBundleData(response.data);
+                        console.log('RESULTS_V3: Fallback bundle data loaded:', response.data);
+                    } else {
+                        console.warn('RESULTS_V3: No bundle ID available for fallback');
+                    }
+                } catch (fallbackErr) {
+                    console.error('RESULTS_V3: Fallback bundle loading also failed:', fallbackErr);
+                }
             }
         };
 
-        loadBundleProducts();
-    }, [bundleId]);
+        loadCertificates();
+    }, [sessionId, derivedRole, bundleId]);
 
-    // Initialize selected IDs when bundle data loads
+    // Initialize selected IDs when bundle data loads - auto-select default and ai types
     useEffect(() => {
         if (bundleData?.certifications) {
-            console.log('ResultsPage: Initializing selection with 101, 102, 105', bundleData.certifications);
-            // Default to CDAPx I, CDAPx II, and AI in Data Analysis (101, 102, 105)
-            setSelectedIndividualIds([101, 102, 105]);
+            console.log('ResultsPage: Initializing selection based on certificate types:', bundleData.certifications);
+            
+            // Log each certificate's type for debugging
+            bundleData.certifications.forEach((cert: any) => {
+                console.log(`ResultsPage: Cert ${cert.skill_id} (${cert.certification_name}) has type: "${cert.type}"`);
+            });
+            
+            let autoSelectedIds: number[] = [];
+            
+            // Check if this is database data (has type field) or mock data (no type field)
+            const hasDatabaseTypes = bundleData.certifications.some((cert: any) => cert.type);
+            
+            if (hasDatabaseTypes) {
+                // Database certificates with type field
+                autoSelectedIds = bundleData.certifications
+                    .filter((cert: any) => {
+                        const shouldSelect = cert.type === 'default' || cert.type === 'ai';
+                        console.log(`ResultsPage: DB Cert ${cert.skill_id} type="${cert.type}" shouldSelect=${shouldSelect}`);
+                        return shouldSelect;
+                    })
+                    .map((cert: any) => cert.skill_id);
+            } else {
+                // Mock data - auto-select specific IDs as fallback
+                // For HR Manager: 101 (CHRP), 102 (Strategic HRBP) as defaults
+                const defaultMockIds = [101, 102]; // These correspond to typical "default" certs
+                autoSelectedIds = bundleData.certifications
+                    .filter((cert: any) => defaultMockIds.includes(cert.skill_id))
+                    .map((cert: any) => cert.skill_id);
+                console.log('ResultsPage: Using mock data, auto-selecting default IDs:', autoSelectedIds);
+            }
+            
+            console.log('ResultsPage: Auto-selected certificate IDs:', autoSelectedIds);
+            setSelectedIndividualIds(autoSelectedIds);
+            console.log('ResultsPage: setSelectedIndividualIds called with:', autoSelectedIds);
+        } else {
+            console.log('ResultsPage: No bundle data available for auto-selection');
         }
     }, [bundleData]);
 
@@ -366,28 +741,37 @@ const ResultsPageV3 = () => {
     const getDynamicBundlePricing = () => {
         if (!bundleData?.certifications) return { price: 0, original: 0, isBundle: false };
 
+        // 🧪 TESTING OVERRIDE: Check if testing mode is enabled
+        const isTestingMode = bundleData.certifications.length > 0 && bundleData.certifications[0].price === 1;
+        
+        if (isTestingMode) {
+            console.log('🧪 TESTING MODE: Using ₹1 prices');
+            const selectedCount = selectedIndividualIds.length;
+            return {
+                price: selectedCount, // ₹1 per selected certificate
+                original: selectedCount * 2, // ₹2 per certificate original
+                isBundle: selectedIndividualIds.length === bundleData.certifications.length
+            };
+        }
+
         let totalPrice = 0;
         let totalOriginal = 0;
 
         selectedIndividualIds.forEach(id => {
             const cert = bundleData.certifications.find(c => c.skill_id === id);
             if (cert) {
-                // Apply custom pricing for specific certifications
+                // Apply pricing based on certificate type
                 let price = cert.price || 999;
                 let originalPrice = cert.original_price || (cert.price ? Math.round(cert.price * 2) : 2499);
 
-                // CDAPx I and CDAPx II (101, 102) - RECOMMENDED - ₹1999 (was ₹4999)
-                if (id === 101 || id === 102) {
+                // Set prices based on certificate type
+                if ((cert as any).type === 'default') {
                     price = 1999;
                     originalPrice = 4999;
-                }
-                // CBAPx and PMPx (103, 104) - 50% OFF - ₹999 (was ₹1999)
-                else if (id === 103 || id === 104) {
+                } else if ((cert as any).type === 'secondary') {
                     price = 999;
                     originalPrice = 1999;
-                }
-                // AI for Data Analysis (105) - POPULAR - ₹999 (was ₹1999)
-                else if (id === 105) {
+                } else if ((cert as any).type === 'ai') {
                     price = 999;
                     originalPrice = 1999;
                 }
@@ -398,15 +782,27 @@ const ResultsPageV3 = () => {
         });
 
         // Add bonus values to the original price (to show true discount including free bonuses)
-        const nonAICertCount = selectedIndividualIds.filter(id => id !== 105).length;
-        const hasAICert = selectedIndividualIds.includes(105);
-        const onlyBasicCerts = selectedIndividualIds.filter(id => id !== 105).every(id => id === 101 || id === 102) && nonAICertCount > 0;
-        const basicCertsWithAI = onlyBasicCerts && hasAICert;
+        const nonAICertCount = selectedIndividualIds.filter(id => {
+            const cert = bundleData.certifications.find(c => c.skill_id === id);
+            return cert && (cert as any).type !== 'ai';
+        }).length;
+        const hasAICert = selectedIndividualIds.some(id => {
+            const cert = bundleData.certifications.find(c => c.skill_id === id);
+            return cert && (cert as any).type === 'ai';
+        });
+        const onlyDefaultCerts = selectedIndividualIds.filter(id => {
+            const cert = bundleData.certifications.find(c => c.skill_id === id);
+            return cert && (cert as any).type !== 'ai';
+        }).every(id => {
+            const cert = bundleData.certifications.find(c => c.skill_id === id);
+            return cert && (cert as any).type === 'default';
+        }) && nonAICertCount > 0;
+        const defaultCertsWithAI = onlyDefaultCerts && hasAICert;
 
         let activeBonusCount = 0;
-        if (basicCertsWithAI) {
+        if (defaultCertsWithAI) {
             activeBonusCount = 2;
-        } else if (onlyBasicCerts) {
+        } else if (onlyDefaultCerts) {
             activeBonusCount = 1;
         } else if (nonAICertCount >= 3) {
             activeBonusCount = 4;
@@ -557,7 +953,7 @@ const ResultsPageV3 = () => {
             prefill: {
                 name: notes.user_name,
                 email: notes.user_email,
-                contact: ''
+                contact: notes.user_phone || ''
             },
             theme: {
                 color: '#7FC241'
@@ -619,27 +1015,78 @@ const ResultsPageV3 = () => {
                 product_name: bundleData?.bundle_name || 'Complete Certification Bundle'
             });
 
-            // Get User Details for Notes
+            // Get User Details for Notes - Try multiple sources
+            console.log('Retrieving user data for bundle order...');
+            
+            // 1. Try localStorage first
             const allStorage = localStorage;
             const userDataStr = allStorage.getItem('userData');
             const userData = userDataStr ? JSON.parse(userDataStr) : {};
-            const userEmail = userData.email || 'guest@example.com';
-            // Try to get name from multiple sources
-            const userNameVal = userData.name || userData.contactDetails?.name || userName || 'Guest';
+            
+            // 2. Get individual items from localStorage as backup
+            const storedEmail = localStorage.getItem('userEmail');
+            const storedName = localStorage.getItem('userName'); 
+            const storedPhone = localStorage.getItem('userPhone');
+            
+            // 3. Try to get user data from database session
+            let dbUserData = null;
+            if (sessionId) {
+                try {
+                    const { data: sessionData, error } = await supabase
+                        .from('sessions')
+                        .select(`
+                            user_id,
+                            users!inner(name, email, phone_number)
+                        `)
+                        .eq('id', sessionId)
+                        .single();
+                        
+                    if (!error && sessionData?.users) {
+                        // Handle both array and object responses from Supabase
+                        dbUserData = Array.isArray(sessionData.users) ? sessionData.users[0] : sessionData.users;
+                        console.log('Retrieved user data from database:', dbUserData);
+                    }
+                } catch (e) {
+                    console.warn('Failed to get user data from database:', e);
+                }
+            }
+            
+            // 4. Priority order: DB data > localStorage individual items > userData object > fallback
+            const userEmail = dbUserData?.email || storedEmail || userData.email || 'guest@example.com';
+            const userPhone = dbUserData?.phone_number || storedPhone || userData.phone || '';
+            const userNameVal = dbUserData?.name || storedName || userData.name || userData.contactDetails?.name || userName || 'Guest';
+            
+            console.log('Final user data for bundle order:', { userNameVal, userEmail, userPhone });
 
             const productList = bundleData?.certifications.map(c => c.certification_name).join(', ') || 'All Certifications';
+
+            // Get role ID from bundleData certificates (they all have the same role_id)
+            const roleId = bundleData?.certifications?.[0]?.role_id || 37;
+
+            // Prepare detailed items array for Razorpay order
+            const detailedItems = bundleData?.certifications.map(cert => ({
+                id: cert.skill_id, // Real database certificate ID
+                name: cert.certification_name, // Full name
+                short_name: cert.certification_name_short, // Short name
+                price: cert.price || 0,
+                tier: cert.badge || cert.type || "Core Certification" // Badge/tier information
+            })) || [];
 
             // Create Order via Real API
             const orderData = await createPaymentOrder(
                 price,
                 productList,
-                'specialized_v2_hr_static',
+                'specialized_platform_main',
                 {
                     user_name: userNameVal,
                     user_email: userEmail,
-                    project_name: 'specialized_v2_hr_static',
+                    user_phone: userPhone,
+                    session_id: sessionId,
+                    role_id: roleId,
+                    project_name: 'specialized_platform_main',
                     purchase_type: 'BUNDLE'
-                }
+                },
+                detailedItems // Pass detailed items array
             );
 
             // Assuming orderData returns { id: 'order_...', ... } from Razorpay
@@ -653,17 +1100,18 @@ const ResultsPageV3 = () => {
             const notes = {
                 user_name: userNameVal,
                 user_email: userEmail,
-                project_name: 'specialized_v2_hr_static',
+                user_phone: userPhone,
+                session_id: sessionId,
+                role_id: roleId,
+                project_name: 'specialized_platform_main',
                 purchase_type: 'BUNDLE',
-                item_list: bundleData?.certifications.map(c => {
-                    if (c.skill_id === 101) return "CDAPx I";
-                    if (c.skill_id === 102) return "CDAPx II";
-                    return c.certification_name_short || c.certification_name;
-                }).join(', '),
+                item_list: bundleData?.certifications.map(c => c.certification_name_short || c.certification_name).join(', '),
                 detailed_items: JSON.stringify(bundleData?.certifications.map(c => ({
-                    id: c.skill_id,
-                    name: c.certification_name,
-                    tier: (c.skill_id === 101 || c.skill_id === 102) ? (c.skill_id === 101 ? "Basic" : "Advanced") : "Standard"
+                    id: c.skill_id, // Database certificate ID
+                    name: c.certification_name, // Full certificate name
+                    short_name: c.certification_name_short, // Short certificate name
+                    price: c.price || 0,
+                    tier: c.badge || "Standard"
                 })))
             };
 
@@ -685,27 +1133,78 @@ const ResultsPageV3 = () => {
                 product_count: selectedCerts.length
             });
 
-            // Get User Details for Notes
+            // Get User Details for Notes - Try multiple sources
+            console.log('Retrieving user data for individual order...');
+            
+            // 1. Try localStorage first
             const allStorage = localStorage;
             const userDataStr = allStorage.getItem('userData');
             const userData = userDataStr ? JSON.parse(userDataStr) : {};
-            const userEmail = userData.email || 'guest@example.com';
-            // Try to get name from multiple sources
-            const userNameVal = userData.name || userData.contactDetails?.name || userName || 'Guest';
+            
+            // 2. Get individual items from localStorage as backup
+            const storedEmail = localStorage.getItem('userEmail');
+            const storedName = localStorage.getItem('userName'); 
+            const storedPhone = localStorage.getItem('userPhone');
+            
+            // 3. Try to get user data from database session
+            let dbUserData = null;
+            if (sessionId) {
+                try {
+                    const { data: sessionData, error } = await supabase
+                        .from('sessions')
+                        .select(`
+                            user_id,
+                            users!inner(name, email, phone_number)
+                        `)
+                        .eq('id', sessionId)
+                        .single();
+                        
+                    if (!error && sessionData?.users) {
+                        // Handle both array and object responses from Supabase
+                        dbUserData = Array.isArray(sessionData.users) ? sessionData.users[0] : sessionData.users;
+                        console.log('Retrieved user data from database:', dbUserData);
+                    }
+                } catch (e) {
+                    console.warn('Failed to get user data from database:', e);
+                }
+            }
+            
+            // 4. Priority order: DB data > localStorage individual items > userData object > fallback
+            const userEmail = dbUserData?.email || storedEmail || userData.email || 'guest@example.com';
+            const userPhone = dbUserData?.phone_number || storedPhone || userData.phone || '';
+            const userNameVal = dbUserData?.name || storedName || userData.name || userData.contactDetails?.name || userName || 'Guest';
+            
+            console.log('Final user data for individual order:', { userNameVal, userEmail, userPhone });
 
             const productList = selectedCerts.map(c => c.certification_name).join(', ');
+
+            // Get role ID from selected certificates (they all have the same role_id)
+            const roleId = selectedCerts?.[0]?.role_id || 37;
+
+            // Prepare detailed items array for Razorpay order
+            const detailedItems = selectedCerts.map(cert => ({
+                id: cert.skill_id, // Real database certificate ID
+                name: cert.certification_name, // Full name
+                short_name: cert.certification_name_short, // Short name
+                price: cert.price || 0,
+                tier: cert.badge || cert.type || "Core Certification" // Badge/tier information
+            }));
 
             // Create Order via Real API
             const orderData = await createPaymentOrder(
                 totalPrice,
                 productList,
-                'specialized_v2_hr_static',
+                'specialized_platform_main',
                 {
                     user_name: userNameVal,
                     user_email: userEmail,
-                    project_name: 'specialized_v2_hr_static',
+                    user_phone: userPhone,
+                    session_id: sessionId,
+                    role_id: roleId,
+                    project_name: 'specialized_platform_main',
                     purchase_type: 'INDIVIDUAL'
-                }
+                },
+                detailedItems // Pass detailed items array
             );
 
             const razorpayOrderId = orderData.id;
@@ -715,17 +1214,18 @@ const ResultsPageV3 = () => {
             const notes = {
                 user_name: userNameVal,
                 user_email: userEmail,
-                project_name: 'specialized_v2_hr_static',
+                user_phone: userPhone,
+                session_id: sessionId,
+                role_id: roleId,
+                project_name: 'specialized_platform_main',
                 purchase_type: 'INDIVIDUAL',
-                item_list: selectedCerts.map(c => {
-                    if (c.skill_id === 101) return "CDAPx I";
-                    if (c.skill_id === 102) return "CDAPx II";
-                    return c.certification_name_short || c.certification_name;
-                }).join(', '),
+                item_list: selectedCerts.map(c => c.certification_name_short || c.certification_name).join(', '),
                 detailed_items: JSON.stringify(selectedCerts.map(c => ({
-                    id: c.skill_id,
-                    name: c.certification_name,
-                    tier: (c.skill_id === 101 || c.skill_id === 102) ? (c.skill_id === 101 ? "Basic" : "Advanced") : "Standard"
+                    id: c.skill_id, // Database certificate ID
+                    name: c.certification_name, // Full certificate name
+                    short_name: c.certification_name_short, // Short certificate name
+                    price: c.price || 0,
+                    tier: c.badge || "Standard"
                 })))
             };
 
@@ -862,8 +1362,9 @@ const ResultsPageV3 = () => {
 
                             {/* Purchase Area Wrapper for Intersection Observation */}
                             <div id="purchase-area" className="w-full flex flex-col gap-12 items-center">
+                                
                                 {/* Bundle Section - Show only if passed */}
-                                {!isLoading && score >= 50 && (
+                                {!isLoading && score >= 50 && bundleData && (
                                     <BundleSection
                                         bundleName={bundleData?.bundle_name || `Executive ${derivedRole} Bundle`}
                                         role={derivedRole}
@@ -880,19 +1381,21 @@ const ResultsPageV3 = () => {
                                     />
                                 )}
 
+                                {/* Debug info removed - certificates now loading from database */}
+
                                 {/* Video Testimonials Section */}
-                                {!isLoading && score >= 50 && (
+                                {!isLoading && score >= 50 && bundleData && (
                                     <VideoTestimonialsSection />
                                 )}
 
                                 {/* Career Impact Section - Moved here to be under "How Our Certificates Help" */
                                 /* Note: The above comment refers to BundleSection's internal content. We are placing VideoTestimonials strictly after BundleSection now. */}
-                                {!isLoading && score >= 50 && (
+                                {!isLoading && score >= 50 && bundleData && (
                                     <CareerImpactSection className="animate-fade-in-up animation-delay-400 w-full" />
                                 )}
 
                                 {/* Company Logos */}
-                                {!isLoading && score >= 50 && (
+                                {!isLoading && score >= 50 && bundleData && (
                                     <CertificateValueSection
                                         role={derivedRole}
                                         showBenefits={false}

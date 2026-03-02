@@ -1,11 +1,11 @@
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useState, useRef, useEffect } from 'react';
-import { createSession, checkCertifiedUser } from '../services/api';
+import { createSession, checkCertifiedUser, getRoleDetails } from '../services/api';
 import { extractUrlParams, extractEmailFromUrl } from '../utils/urlParams';
 import { storeSessionId, storeRole, storeUrlParams, hasValidSession, storeEmail, storeContactDetails, getStoredSessionId } from '../utils/localStorage';
 import { analytics } from '../services/analytics';
+import type { RoleData } from '../types';
 
-// Components
 // Components
 import TopBar from '../components/TopBar';
 import HeroSection from '../components/landing/HeroSection';
@@ -19,7 +19,7 @@ import StickyMobileCTA from '../components/landing/StickyMobileCTA';
 
 const RolePageVariant = () => {
     const [searchParams] = useSearchParams();
-    const role = searchParams.get('role') || 'HR Manager';
+    const role = searchParams.get('role') || 'Your Desired Role';
     const navigate = useNavigate();
 
     const [isLoadingSession, setIsLoadingSession] = useState(false);
@@ -28,7 +28,30 @@ const RolePageVariant = () => {
     const [transitionOrigin, setTransitionOrigin] = useState({ x: 0, y: 0 });
     const [showStickyCTA, setShowStickyCTA] = useState(false);
 
-    // Scroll tracking for Sticky CTA
+    // Dynamic Role Data State
+    const [roleData, setRoleData] = useState<RoleData | null>(null);
+    const [isLoadingRole, setIsLoadingRole] = useState(true);
+
+    // Fetch dynamic role data on mount or when role changes
+    useEffect(() => {
+        const fetchRoleData = async () => {
+            setIsLoadingRole(true);
+            try {
+                const data = await getRoleDetails(role);
+                setRoleData(data);
+                console.log('RolePageVariant: Loaded role data', data);
+            } catch (error) {
+                console.error('RolePageVariant: Error fetching role data', error);
+            } finally {
+                setIsLoadingRole(false);
+            }
+        };
+
+        if (role) {
+            fetchRoleData();
+        }
+    }, [role]);
+
     // Scroll tracking for Sticky CTA using Intersection Observer
     const heroCtaRef = useRef<HTMLButtonElement>(null);
 
@@ -202,19 +225,20 @@ const RolePageVariant = () => {
             <main className="flex-1 w-full pt-16 lg:pt-20">
                 <HeroSection
                     onBeginAssessment={() => handleBeginAssessment()}
-                    isLoading={isLoadingSession || isTransitioning}
+                    isLoading={isLoadingSession || isTransitioning || isLoadingRole}
                     ctaRef={heroCtaRef}
+                    roleData={roleData}
                 />
 
-                <ProblemAgitationSection />
+                <ProblemAgitationSection roleData={roleData} />
 
                 <HowItWorksSection />
 
                 <SocialProofSection />
 
-                <BenefitBreakdownSection />
+                <BenefitBreakdownSection roleData={roleData} />
 
-                <FAQSection />
+                <FAQSection roleData={roleData} />
 
                 <FinalCTASection
                     onBeginAssessment={() => handleBeginAssessment()}

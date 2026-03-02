@@ -1,4 +1,22 @@
-const ProblemAgitationSection = () => {
+import type { RoleData } from '../../types';
+
+interface ProblemAgitationSectionProps {
+    roleData: RoleData | null;
+}
+
+const ProblemAgitationSection = ({ roleData }: ProblemAgitationSectionProps) => {
+
+    const displayRoleName = roleData?.role_name || "Professionals";
+
+    // Default to the static frameworks if none are in the DB or loading
+    const rawFrameworks = roleData?.frameworks?.length ? roleData.frameworks : ["CHRPx", "SHRBPx"];
+
+    // Safely format the frameworks into a readable string
+    const formattedFrameworks = rawFrameworks.length > 1
+        ? `${rawFrameworks.slice(0, -1).join(', ')} and ${rawFrameworks[rawFrameworks.length - 1]}`
+        : rawFrameworks[0] || "";
+
+
     return (
         <section className="py-10 px-4 md:px-6 relative overflow-hidden bg-[#001018]">
             {/* Abstract background elements */}
@@ -10,7 +28,7 @@ const ProblemAgitationSection = () => {
             <div className="max-w-7xl mx-auto relative z-10">
                 <div className="text-center mb-10 max-w-3xl mx-auto">
                     <h2 className="text-3xl md:text-4xl font-bold text-white mb-4">
-                        Most Senior <br />HR Managers Are <br /><span className="text-[#EF4444]">Underpaid by 40%</span>
+                        Most Senior <br />{displayRoleName} Are <br /><span className="text-[#EF4444]">Underpaid by 40%</span>
                     </h2>
                     <p className="text-md text-white/70 leading-normal">
                         Your experience is valuable, but it's invisible to the global market. Without international benchmarking, you are paid based on local standards, not your true global worth.
@@ -44,7 +62,7 @@ const ProblemAgitationSection = () => {
                         </div>
                         <h3 className="text-xl font-bold text-white mb-3">Invisible Expertise</h3>
                         <p className="text-white/60 leading-relaxed">
-                            You lead organizational growth, but without framework validation (CHRPx, SHRBPx), recruiters just see "years of experience" instead of "strategic leadership".
+                            You lead organizational growth, but without framework validation ({formattedFrameworks}), recruiters just see "years of experience" instead of "strategic leadership".
                         </p>
                     </div>
 
