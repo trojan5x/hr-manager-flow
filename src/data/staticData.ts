@@ -117,6 +117,9 @@ export const MOCK_ASSESSMENT: ScenariosResponse = {
   "phase": "Workforce Planning",
   "phase_description": "Analyze current talent capability, forecast future needs, and identify gaps to align the workforce with strategic business goals.",
   "scenario_name": "Strategic Workforce Gap Analysis",
+  "context": "TechGrowth Inc. is expanding its AI division by 200% over the next 18 months. HR needs to ensure enough qualified talent serves this growth while managing attrition in legacy departments.",
+  "challenge": "The company needs to hire and develop a large number of AI specialists while managing the transition of existing employees from legacy departments. This requires balancing external hiring costs with internal development programs.",
+  "task": "Conduct a comprehensive workforce gap analysis to determine hire vs. build strategies for key AI roles and develop a transition plan for legacy staff.",
   "project_mandate": {
     "business_problem": "TechGrowth Inc. is expanding its AI division by 200% over the next 18 months. HR needs to ensure enough qualified talent serves this growth while managing attrition in legacy departments.",
     "high_level_goal": "Conduct a comprehensive workforce gap analysis to determine hire vs. build strategies for key AI roles and develop a transition plan for legacy staff.",
@@ -277,6 +280,9 @@ export const MOCK_ASSESSMENT: ScenariosResponse = {
   "phase": "HR Data Quality",
   "phase_description": "Assess the reliability, completeness, and consistency of people data stored in HRIS and other systems.",
   "scenario_name": "Cleansing the Employee Master Data",
+  "context": "A recent payroll audit revealed discrepancies in employee records. The CHRO suspects data quality issues in the HRIS (Workday) affecting compliance and reporting.",
+  "challenge": "Employee data across systems is inconsistent and incomplete, creating compliance risks and undermining the reliability of HR analytics and reporting.",
+  "task": "Profile the Employee Master Data to identify quality gaps (missing fields, inconsistencies, duplicates) and establish a remediation plan.",
   "project_mandate": {
     "business_problem": "A recent payroll audit revealed discrepancies in employee records. The CHRO suspects data quality issues in the HRIS (Workday) affecting compliance and reporting.",
     "high_level_goal": "Profile the Employee Master Data to identify quality gaps (missing fields, inconsistencies, duplicates) and establish a remediation plan.",
@@ -437,6 +443,9 @@ export const MOCK_ASSESSMENT: ScenariosResponse = {
   "phase": "Turnover Analysis",
   "phase_description": "Clean, transform, and integrate people data to prepare for predictive churn modeling.",
   "scenario_name": "Preparing the Attrition Dataset",
+  "context": "Data quality is now better, but you need to combine data from the ATS (hiring info), HRIS (demographics), and Engagement Survey (scores) to analyze why people are leaving.",
+  "challenge": "Multiple data sources need to be integrated while handling missing data and ensuring the dataset accurately represents employee flight risk without bias or gaps.",
+  "task": "Create a unified 'Employee Churn' dataset. Handle missing survey data, calculate 'Tenure' and 'Time since promotion', and identify high-flight-risk segments.",
   "project_mandate": {
     "business_problem": "Data quality is now better, but you need to combine data from the ATS (hiring info), HRIS (demographics), and Engagement Survey (scores) to analyze why people are leaving.",
     "high_level_goal": "Create a unified 'Employee Churn' dataset. Handle missing survey data, calculate 'Tenure' and 'Time since promotion', and identify high-flight-risk segments.",
@@ -597,6 +606,9 @@ export const MOCK_ASSESSMENT: ScenariosResponse = {
   "phase": "Recruitment Analytics",
   "phase_description": "Analyze the hiring pipeline to discover bottlenecks, improve conversion rates, and forecast time-to-fill.",
   "scenario_name": "Optimizing the Hiring Pipeline",
+  "context": "Strategic roles take 90+ days to fill. Candidates drop off after the 'Technical Interview' stage. Executives need to speed up hiring without lowering the bar.",
+  "challenge": "The hiring process is too slow and has significant drop-off points, particularly at the technical interview stage, creating bottlenecks that prevent the organization from filling critical roles quickly.",
+  "task": "Analyze the recruitment funnel (Applications → Screen → Interview → Offer → Hire) to identify bottlenecks and predict time-to-fill for future roles.",
   "project_mandate": {
     "business_problem": "Strategic roles take 90+ days to fill. Candidates drop off after the 'Technical Interview' stage. Executives need to speed up hiring without lowering the bar.",
     "high_level_goal": "Analyze the recruitment funnel (Applications → Screen → Interview → Offer → Hire) to identify bottlenecks and predict time-to-fill for future roles.",
@@ -757,6 +769,9 @@ export const MOCK_ASSESSMENT: ScenariosResponse = {
   "phase": "Comp & Benefits",
   "phase_description": "Evaluate market competitiveness and internal equity to design a fair and motivating compensation strategy.",
   "scenario_name": "Redesigning the Pay Structure",
+  "context": "Employees are complaining about low pay, but the CFO says our 'Average Salary' is above market. You suspect averages are misleading and there are equity issues.",
+  "challenge": "There's a disconnect between employee perception of pay fairness and leadership's view that compensation is competitive, suggesting underlying equity or distribution issues that need analysis.",
+  "task": "Analyze salary distributions against market benchmarks (Compa-Ratios) and internal equity (Gender/Tenure gaps) to propose a budget-neutral adjustment plan.",
   "project_mandate": {
     "business_problem": "Employees are complaining about low pay, but the CFO says our 'Average Salary' is above market. You suspect averages are misleading and there are equity issues.",
     "high_level_goal": "Analyze salary distributions against market benchmarks (Compa-Ratios) and internal equity (Gender/Tenure gaps) to propose a budget-neutral adjustment plan.",

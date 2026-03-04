@@ -113,8 +113,8 @@ const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef, roleData }:
             {/* Main Content */}
             <div className="flex flex-col items-center lg:items-center text-center w-full max-w-4xl z-10">
 
-                <h1 className="text-3xl min-[375px]:text-4xl md:text-5xl lg:text-6xl font-bold text-white leading-none mb-3">
-                    {userName && <>{userName}, </>}Turn Your {displayRoleName} Experience Into <span className="text-[#98D048]">Global Recognition</span>
+                <h1 className="text-3xl min-[375px]:text-4xl md:text-5xl lg:text-6xl font-normal text-white leading-none mb-3">
+                    {userName && <>{userName}, </>}Turn Your <span className="text-[#98D048] font-bold">{displayRoleName}</span> Experience Into <span className="text-[#98D048] font-bold">Global Recognition</span>
                 </h1>
 
                 <p className="text-sm md:text-lg text-white/80 mb-3 max-w-xl leading-normal">

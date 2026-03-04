@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 
 // Add imports at top
 import type { CertificationItem } from '../types';
+import { CertificateHtmlRenderer } from './CertificateHtmlRenderer';
 
 interface BundleSectionProps {
     bundleName: string;
@@ -18,6 +19,7 @@ interface BundleSectionProps {
     skills?: string[];
     selectedIds?: number[];
     onToggle?: (id: number) => void;
+    userName?: string; // Add userName prop for certificate rendering
 }
 
 // Helper component for animating numbers
@@ -67,7 +69,8 @@ const BundleSection: React.FC<BundleSectionProps> = ({
     certifications = [],
     skills = [],
     selectedIds = [],
-    onToggle
+    onToggle,
+    userName
 }) => {
     const [activeIndex, setActiveIndex] = useState(0);
     const [touchStart, setTouchStart] = useState<number | null>(null);
@@ -194,13 +197,10 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                 </div>
 
                                                 <div className="relative w-full overflow-hidden border border-[#D4AF37]">
-                                                    <img
-                                                        src={cert.certificate_preview_url || "/assets/cert-demo.png"}
-                                                        alt={cert.certification_name}
-                                                        className="w-full h-auto object-contain drop-shadow-2xl"
-                                                        onError={(e) => {
-                                                            (e.target as HTMLImageElement).src = "/assets/cert-demo.png";
-                                                        }}
+                                                    <CertificateHtmlRenderer
+                                                        certificate={cert}
+                                                        userName={userName}
+                                                        className="w-full h-auto drop-shadow-2xl"
                                                     />
 
                                                     {/* Watermark overlay */}
@@ -286,10 +286,11 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                             >
                                                 {/* Thumbnail - Smaller */}
                                                 <div className="w-12 h-9 flex-shrink-0 overflow-hidden rounded bg-gray-800">
-                                                    <img
-                                                        src={cert.certificate_preview_url || "/assets/cert-demo.png"}
-                                                        alt={cert.certification_name}
-                                                        className={`w-full h-full object-cover transition-all ${selectedIds.includes(cert.skill_id) ? '' : 'grayscale'}`}
+                                                    <CertificateHtmlRenderer
+                                                        certificate={cert}
+                                                        userName={userName}
+                                                        compact={true}
+                                                        className={`w-full h-full transition-all ${selectedIds.includes(cert.skill_id) ? '' : 'grayscale'}`}
                                                     />
                                                 </div>
 
@@ -490,7 +491,7 @@ const BundleSection: React.FC<BundleSectionProps> = ({
 
                                         const bonuses = [
                                             {
-                                                name: `HR Mastery Course`,
+                                                name: `${role} Mastery Course`,
                                                 description: "Complete curriculum covering advanced strategies & leadership.",
                                                 value: 2999,
                                                 icon: (
@@ -501,7 +502,7 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                 unlocked: activeBonusCount >= 1
                                             },
                                             {
-                                                name: `AI for HR Professionals Course`,
+                                                name: `AI for ${role} Professionals Course`,
                                                 description: "Master ChatGPT, Claude & AI tools to 100x your workflow.",
                                                 value: 1999,
                                                 icon: (

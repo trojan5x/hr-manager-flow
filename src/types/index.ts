@@ -195,6 +195,9 @@ export interface Scenario {
   phase: string;
   phase_description: string;
   scenario_name: string;
+  context: string;
+  challenge: string;
+  task: string;
   project_mandate: {
     business_problem: string;
     high_level_goal: string;

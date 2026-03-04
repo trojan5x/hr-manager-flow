@@ -4,8 +4,7 @@ import lottie from 'lottie-web';
 import AssessmentProgressBar from '../components/AssessmentProgressBar';
 // import InteractiveWalkthrough, { type Step } from '../components/InteractiveWalkthrough';
 import TopBar from '../components/TopBar';
-import { fetchBundleScenarios, updateProgressWithRetry, createUserAssessment, updateAssessmentPhase, completeAssessment } from '../services/api';
-import { supabase } from '../services/supabaseClient';
+import { fetchBundleScenarios, updateProgressWithRetry, updateAssessmentPhase, completeAssessment } from '../services/api';
 import {
     getStoredBundleId,
     getStoredSessionId,
@@ -234,22 +233,16 @@ const AssessmentPage = () => {
                 setIsInitialLoading(false);
                 setIsLoadingScenario(false);
 
-                // Create initial user assessment record
+                // Create initial user assessment record (temporarily disabled to fix loading)
                 try {
-                    // Get the first phase ID
-                    const { data: firstPhaseData } = await supabase
-                        .from('assessment_phases')
-                        .select('id')
-                        .eq('order_index', 1)
-                        .single();
-
-                    await createUserAssessment({
-                        session_id: parseInt(currentSessionId),
-                        current_phase_id: firstPhaseData?.id || null,
-                        is_complete: false,
-                        user_answers: {}
-                    });
-                    console.log('Initial user assessment record created');
+                    console.log('Skipping user assessment creation to avoid query issues');
+                    // await createUserAssessment({
+                    //     session_id: parseInt(currentSessionId),
+                    //     current_phase_id: null, // Will be set when phases are actually started
+                    //     is_complete: false,
+                    //     user_answers: {}
+                    // });
+                    // console.log('Initial user assessment record created');
                 } catch (assessmentError) {
                     console.warn('Failed to create initial assessment record:', assessmentError);
                     // Don't block the assessment if this fails
@@ -392,10 +385,10 @@ const AssessmentPage = () => {
         }
 
         return {
-            scenario: scenario.project_mandate.business_problem,
-            challenge: scenario.phase_description,
-            task: scenario.project_mandate.high_level_goal,
-            goal: scenario.project_mandate.initial_budget
+            scenario: scenario.context,
+            challenge: scenario.challenge,
+            task: scenario.task,
+            goal: scenario.project_mandate?.initial_budget || ""
         };
     };
 

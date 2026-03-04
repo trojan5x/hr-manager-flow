@@ -1378,6 +1378,7 @@ const ResultsPageV3 = () => {
                                         certifications={bundleData?.certifications}
                                         selectedIds={selectedIndividualIds}
                                         onToggle={toggleIndividualCert}
+                                        userName={userName}
                                     />
                                 )}
 

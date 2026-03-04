@@ -471,6 +471,10 @@ export const fetchBundleScenarios = async (
         phase: phase.phase_name,
         phase_description: phase.phase_description,
         scenario_name: dbScenario.name,
+        // Add the direct fields that the frontend expects
+        context: dbScenario.context,
+        challenge: dbScenario.challenge,
+        task: dbScenario.task,
         project_mandate: dbScenario.project_mandate || {
             business_problem: dbScenario.context,
             high_level_goal: dbScenario.task,
