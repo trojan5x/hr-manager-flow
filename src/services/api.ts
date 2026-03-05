@@ -1700,6 +1700,70 @@ export const getUserCertificates = async (sessionId: string) => {
 };
 
 /**
+ * Get User Certificates for a specific payment
+ */
+export const getUserCertificatesForPayment = async (sessionId: string, paymentId: string) => {
+    console.log(`API: Fetching user certificates for session ${sessionId} and payment ${paymentId}`);
+    
+    try {
+        // First get the user_id from session
+        const { data: sessionData, error: sessionError } = await supabase
+            .from('sessions')
+            .select('user_id')
+            .eq('id', sessionId)
+            .single();
+
+        if (sessionError || !sessionData?.user_id) {
+            console.error('Failed to get session data:', sessionError);
+            return [];
+        }
+
+        const { data, error } = await supabase
+            .from('user_certificates')
+            .select(`
+                id,
+                certificate_id,
+                certificate_image_url,
+                certificate_image_expires_at,
+                status,
+                issued_at,
+                metadata,
+                role_certificates!inner(
+                    name,
+                    short_name,
+                    certificate_name,
+                    type
+                )
+            `)
+            .eq('user_id', sessionData.user_id)
+            .contains('metadata', { razorpay_payment_id: paymentId })
+            .order('issued_at', { ascending: true });
+
+        if (error) {
+            console.error('Failed to fetch user certificates for payment:', error);
+            return [];
+        }
+
+        // Check for expired images and mark them as needing regeneration
+        const now = new Date();
+        const processedCerts = (data || []).map(cert => ({
+            ...cert,
+            image_expired: cert.certificate_image_expires_at && 
+                           new Date(cert.certificate_image_expires_at) <= now,
+            needs_generation: !cert.certificate_image_url || 
+                             (cert.certificate_image_expires_at && 
+                              new Date(cert.certificate_image_expires_at) <= now)
+        }));
+
+        console.log(`User certificates for payment ${paymentId} fetched successfully:`, processedCerts.length);
+        return processedCerts;
+    } catch (error) {
+        console.error('Error in getUserCertificatesForPayment:', error);
+        return [];
+    }
+};
+
+/**
  * Get User Certificates by User ID
  */
 export const getUserCertificatesByUserId = async (userId: number) => {

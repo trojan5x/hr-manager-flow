@@ -273,21 +273,41 @@ serve(async (req) => {
 
                         const userName = userData?.name || 'Valued Professional';
 
-                        // Create certificate records for each purchased certificate
+                        // Create certificate records for each purchased certificate (with duplicate prevention)
                         const certificateInserts = [];
+                        const certificateResults = [];
                         
                         for (const cert of purchasedCerts) {
-                            const timestamp = Date.now();
-                            const certificateId = `CERT-${cert.role_certificate_id}-${timestamp}`;
+                            // Check if certificate already exists for this payment + role_certificate combination
+                            const { data: existingCert } = await supabase
+                                .from('user_certificates')
+                                .select('id, certificate_id, status')
+                                .eq('user_id', updatedOrderData.user_id)
+                                .eq('role_certificate_id', cert.role_certificate_id)
+                                .contains('metadata', { razorpay_payment_id: payment.id })
+                                .single();
+
+                            if (existingCert) {
+                                console.log(`Certificate already exists for payment ${payment.id} + role_cert ${cert.role_certificate_id}: ${existingCert.certificate_id}`);
+                                certificateResults.push({
+                                    certificate_id: existingCert.certificate_id,
+                                    status: 'already_exists',
+                                    existing_record_id: existingCert.id
+                                });
+                                continue;
+                            }
+
+                            // Create unique certificate ID using payment_id for consistency
+                            const certificateId = `CERT-${cert.role_certificate_id}-${payment.id.replace('pay_', '')}`;
 
                             certificateInserts.push({
                                 user_id: updatedOrderData.user_id,
                                 role_id: cert.role_certificates.role_id,
                                 role_certificate_id: cert.role_certificate_id,
                                 certificate_id: certificateId,
-                                session_id: updatedOrderData.session_id, // NEW: Store session_id
+                                session_id: updatedOrderData.session_id,
                                 status: 'pending',
-                                // Note: certificate_image_url is NULL (to be filled later on success page)
+                                // Note: certificate_image_url is NULL (to be filled later)
                                 // certificate_image_expires_at is NULL (to be filled when image is generated)
                                 metadata: {
                                     order_id: updatedOrderData.id,
@@ -300,19 +320,32 @@ serve(async (req) => {
                             });
                         }
 
-                        // Bulk insert certificate records
-                        const { data: insertedCerts, error: insertError } = await supabase
-                            .from('user_certificates')
-                            .insert(certificateInserts)
-                            .select('id, certificate_id');
-
-                        if (insertError) {
-                            console.error('Failed to create certificate records:', insertError);
-                            // Don't fail the webhook for this, but log it
+                        // Only insert if we have new certificates to create
+                        let insertedCerts = [];
+                        if (certificateInserts.length > 0) {
+                            console.log(`Creating ${certificateInserts.length} new certificate records...`);
+                            const { data: newCerts, error: insertError } = await supabase
+                                .from('user_certificates')
+                                .insert(certificateInserts)
+                                .select('id, certificate_id');
+                            
+                            if (insertError) {
+                                console.error('Failed to create certificate records:', insertError);
+                            } else {
+                                insertedCerts = newCerts || [];
+                                console.log(`Successfully created ${insertedCerts.length} certificate records`);
+                                console.log('Certificate IDs created:', insertedCerts.map(c => c.certificate_id));
+                            }
                         } else {
-                            console.log(`Successfully created ${insertedCerts?.length || 0} certificate records`);
-                            console.log('Certificate IDs created:', insertedCerts?.map(c => c.certificate_id));
+                            console.log('No new certificate records to create - all already exist');
                         }
+
+                        // Add results from existing certificates  
+                        certificateResults.push(...(insertedCerts.map(cert => ({
+                            certificate_id: cert.certificate_id,
+                            status: 'created',
+                            record_id: cert.id
+                        }))));
                     } else {
                         console.log('No purchased certificates found for this order');
                     }
@@ -324,11 +357,25 @@ serve(async (req) => {
                 console.log('Skipping certificate creation - missing order_id or user_id');
             }
 
-            // STEP 6: Call Xano API for internal logging
+            // STEP 6: Call Xano API for internal logging (with duplicate prevention)
             if (updatedOrderData.id && updatedOrderData.user_id) {
-                console.log('Calling Xano API for payment logging...');
+                console.log('Checking if Xano API call is needed...');
                 
-                try {
+                // Check if we've already called Xano API for this payment
+                const { data: existingXanoCall } = await supabase
+                    .from('payments') 
+                    .select('metadata')
+                    .eq('razorpay_payment_id', payment.id)
+                    .single();
+                
+                const alreadyCalledXano = existingXanoCall?.metadata?.xano_api_called;
+                
+                if (alreadyCalledXano) {
+                    console.log(`Xano API already called for payment ${payment.id}. Skipping duplicate call.`);
+                } else {
+                    console.log('Calling Xano API for payment logging...');
+                    
+                    try {
                     // Get user data for the API call
                     const { data: userData, error: userError } = await supabase
                         .from('users')
@@ -383,10 +430,10 @@ serve(async (req) => {
                             }
                         }
 
-                        // Generate certificate images for the certificates we just created
-                        console.log('Generating certificate images...');
+                        // Generate certificate images for NEW certificates only (prevent duplicates)
+                        console.log('Checking for certificates needing image generation...');
                         try {
-                            // Get the certificates that were just created (they should be pending)
+                            // Only get certificates that were created for THIS specific payment and need images
                             const { data: pendingCerts, error: pendingError } = await supabase
                                 .from('user_certificates')
                                 .select(`
@@ -400,15 +447,29 @@ serve(async (req) => {
                                 `)
                                 .eq('user_id', updatedOrderData.user_id)
                                 .eq('status', 'pending')
-                                .order('created_at', { ascending: false })
-                                .limit(10); // Limit to recent certificates
+                                .contains('metadata', { razorpay_payment_id: payment.id }) // Only for this payment
+                                .is('certificate_image_url', null) // Only if no image exists
+                                .order('created_at', { ascending: false });
 
                             if (pendingCerts && pendingCerts.length > 0) {
-                                console.log(`Found ${pendingCerts.length} certificates to generate images for`);
+                                console.log(`Found ${pendingCerts.length} certificates needing image generation for payment ${payment.id}`);
                                 
                                 // Generate images for each certificate
                                 for (const cert of pendingCerts) {
                                     try {
+                                        // Double-check this certificate hasn't been processed by another webhook instance
+                                        const { data: recheckCert } = await supabase
+                                            .from('user_certificates')
+                                            .select('status, certificate_image_url')
+                                            .eq('certificate_id', cert.certificate_id)
+                                            .single();
+                                        
+                                        // Skip if already processed
+                                        if (recheckCert?.certificate_image_url || recheckCert?.status === 'generated') {
+                                            console.log(`Certificate ${cert.certificate_id} already has image, skipping...`);
+                                            continue;
+                                        }
+
                                         const certName = cert.role_certificates.certificate_name || cert.role_certificates.name;
                                         const certShort = cert.role_certificates.short_name || 'CERT';
                                         const userName = cert.metadata?.user_name || userData.name || 'Professional';
@@ -445,7 +506,7 @@ serve(async (req) => {
                                             const imageUrl = imageResult.data?.file_url;
                                             
                                             if (imageUrl) {
-                                                // Update certificate with generated image URL
+                                                // Update certificate with generated image URL (with race condition protection)
                                                 const { error: updateError } = await supabase
                                                     .from('user_certificates')
                                                     .update({
@@ -453,7 +514,8 @@ serve(async (req) => {
                                                         certificate_image_expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(), // 7 days
                                                         status: 'generated'
                                                     })
-                                                    .eq('certificate_id', cert.certificate_id);
+                                                    .eq('certificate_id', cert.certificate_id)
+                                                    .is('certificate_image_url', null); // Only update if still null
                                                 
                                                 if (!updateError) {
                                                     console.log(`Image generated and saved for certificate: ${cert.certificate_id}`);
@@ -472,6 +534,8 @@ serve(async (req) => {
                                         console.error(`Error generating image for certificate ${cert.certificate_id}:`, imageError);
                                     }
                                 }
+                            } else {
+                                console.log('No certificates need image generation for this payment');
                             }
                         } catch (imageGenError) {
                             console.error('Error in certificate image generation process:', imageGenError);
@@ -531,6 +595,19 @@ serve(async (req) => {
                         if (xanoResponse.ok) {
                             const xanoResult = await xanoResponse.json();
                             console.log('Xano API call successful:', xanoResult);
+                            
+                            // Mark this payment as having called Xano API to prevent duplicates
+                            await supabase
+                                .from('payments')
+                                .update({
+                                    metadata: {
+                                        ...(existingXanoCall?.metadata || {}),
+                                        xano_api_called: true,
+                                        xano_api_called_at: new Date().toISOString()
+                                    }
+                                })
+                                .eq('razorpay_payment_id', payment.id);
+                                
                         } else {
                             const xanoError = await xanoResponse.text();
                             console.error('Xano API call failed:', xanoResponse.status, xanoError);
@@ -538,9 +615,6 @@ serve(async (req) => {
                     } else {
                         console.error('Failed to get user data for Xano API call:', userError);
                     }
-                } catch (xanoError) {
-                    console.error('Error calling Xano API:', xanoError);
-                    // Don't fail the webhook for Xano API issues
                 }
             }
 

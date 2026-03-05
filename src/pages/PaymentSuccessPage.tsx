@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import TopBar from '../components/TopBar';
-import { fetchDeliverables, createCertificateDownload, generateCertificateImages, getUserCertificates } from '../services/api';
+import { createCertificateDownload, generateCertificateImages, getUserCertificates, getUserCertificatesForPayment } from '../services/api';
 import type { DeliverableItem } from '../types';
 import { analytics } from '../services/analytics';
-import { getUserEmail, getUserName, getStoredSessionId } from '../utils/localStorage';
+import { getUserEmail, getStoredSessionId } from '../utils/localStorage';
 
 const PaymentSuccessPage = () => {
     const [searchParams] = useSearchParams();
@@ -37,16 +37,19 @@ const PaymentSuccessPage = () => {
             
             try {
                 // Step 1: Load existing certificate records (should exist from webhook processing)
-                const userCertificates = await getUserCertificates(sessionId);
+                // Use payment-specific function if paymentId is available, otherwise fallback to all certificates
+                const userCertificates = paymentId 
+                    ? await getUserCertificatesForPayment(sessionId, paymentId)
+                    : await getUserCertificates(sessionId);
                 
                 if (!userCertificates || userCertificates.length === 0) {
-                    console.log('PaymentSuccess: No certificate records found, using fallback...');
-                    setCertificateGenerationStatus('Setting up certificates...');
-                    loadFallbackDeliverables();
+                    console.log('PaymentSuccess: No certificate records found - webhook may have failed');
+                    setCertificateGenerationStatus('Certificate processing is still in progress. Please wait or refresh the page.');
+                    setError('No certificates found. The webhook may still be processing your payment. Please refresh in a few seconds or contact support if this persists.');
                     return;
                 }
 
-                console.log(`PaymentSuccess: Found ${userCertificates.length} certificate records`);
+                console.log(`PaymentSuccess: Found ${userCertificates.length} certificate records ${paymentId ? `for payment ${paymentId}` : 'for user'}`);
 
                 // Step 2: Display certificates immediately (even if images aren't ready yet)
                 displayCertificates(userCertificates);
@@ -73,7 +76,9 @@ const PaymentSuccessPage = () => {
 
                     // Step 5: Reload certificates with updated images
                     setTimeout(async () => {
-                        const updatedCertificates = await getUserCertificates(sessionId);
+                        const updatedCertificates = paymentId 
+                            ? await getUserCertificatesForPayment(sessionId, paymentId)
+                            : await getUserCertificates(sessionId);
                         displayCertificates(updatedCertificates);
                     }, 1000);
                 } else {
@@ -83,9 +88,9 @@ const PaymentSuccessPage = () => {
                 
             } catch (error) {
                 console.error('PaymentSuccess: Certificate loading/generation failed:', error);
-                setCertificateGenerationStatus('Certificate processing failed. Please contact support.');
-                // Fall back to the old system
-                loadFallbackDeliverables();
+                setCertificateGenerationStatus('Certificate processing failed. The webhook may still be processing your payment.');
+                setError('Certificate processing failed. Please refresh the page in a few seconds or contact support if this persists.');
+                // DO NOT fall back to HR certificates - this was the bug
             } finally {
                 setIsGeneratingCertificates(false);
             }
@@ -114,23 +119,6 @@ const PaymentSuccessPage = () => {
         console.log('PaymentSuccess: Displaying certificates:', mappedItems.length);
     };
 
-    const loadFallbackDeliverables = async () => {
-        // Fallback to the existing deliverables system
-        try {
-            const userName = getUserName() || 'Valued Professional';
-            const response = await fetchDeliverables(orderId || '', sessionId || undefined, userName);
-
-            if (response.result === 'success') {
-                setPurchasedItems(response.data);
-                console.log('PaymentSuccess: Loaded fallback deliverables:', response.data.length);
-            } else {
-                setError('Unable to fetch deliverables details.');
-            }
-        } catch (err) {
-            console.error('PaymentSuccess: Fallback deliverables failed:', err);
-            setError('Failed to load certificate details.');
-        }
-    };
 
     // Load deliverables list
     useEffect(() => {
@@ -379,6 +367,14 @@ const PaymentSuccessPage = () => {
                     </div>
 
                     {/* Certificates Section */}
+                    {_error && (
+                        <div className="animate-fade-in-up animation-delay-600 mb-8">
+                            <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-center">
+                                <p className="text-red-400 text-sm">{_error}</p>
+                            </div>
+                        </div>
+                    )}
+
                     {purchasedItems.length > 0 && (
                         <div className="animate-fade-in-up animation-delay-600">
                             <div className="text-center mb-8">
