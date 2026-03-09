@@ -300,6 +300,12 @@ const RoleGeneratorDashboard: React.FC = () => {
             >
               Analytics
             </a>
+            <a
+              href="/admin/user-lookup"
+              className="py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-300 hover:text-white hover:border-gray-300 transition-colors"
+            >
+              User Lookup
+            </a>
           </nav>
         </div>
       </div>

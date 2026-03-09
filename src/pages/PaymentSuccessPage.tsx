@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import TopBar from '../components/TopBar';
-import { createCertificateDownload, generateCertificateImages, getUserCertificates, getUserCertificatesForPayment } from '../services/api';
+import { createCertificateDownload, generateCertificateImages, getUserCertificates, getUserCertificatesForPayment, getPackDeliverablesForPayment } from '../services/api';
 import type { DeliverableItem } from '../types';
 import { analytics } from '../services/analytics';
 import { getUserEmail, getStoredSessionId } from '../utils/localStorage';
@@ -16,6 +16,8 @@ const PaymentSuccessPage = () => {
     const [downloadingCertId, setDownloadingCertId] = useState<string | null>(null);
     const [_error, setError] = useState<string | null>(null);
     const [purchasedItems, setPurchasedItems] = useState<DeliverableItem[]>([]);
+    const [purchasedCourses, setPurchasedCourses] = useState<any[]>([]);
+    const [purchasedFreebies, setPurchasedFreebies] = useState<any[]>([]);
 
     // Prefetching State
     const [preparedData, setPreparedData] = useState<Record<string, string>>({});
@@ -146,6 +148,19 @@ const PaymentSuccessPage = () => {
     }, [orderId, paymentId]);
 
     // Background pre-fetch of certificates
+    useEffect(() => {
+        if (orderId) {
+            const fetchDeliverables = async () => {
+                const deliverables = await getPackDeliverablesForPayment(orderId);
+                if (deliverables) {
+                    if (deliverables.courses) setPurchasedCourses(deliverables.courses);
+                    if (deliverables.freeItems) setPurchasedFreebies(deliverables.freeItems);
+                }
+            };
+            fetchDeliverables();
+        }
+    }, [orderId]);
+
     useEffect(() => {
         if (purchasedItems.length === 0) return;
 
@@ -418,16 +433,6 @@ const PaymentSuccessPage = () => {
                                                         <p className="text-xs text-gray-400 mt-1">
                                                             Status: {(item as any).status === 'generated' ? 'Ready' : 
                                                                     (item as any).status === 'pending' ? 'Processing' : 'Failed'}
-                                                            {/* Show expiry info for generated certificates */}
-                                                            {(item as any).status === 'generated' && (item as any).certificate_expires_at && (
-                                                                <span className="ml-2">
-                                                                    • Expires {new Date((item as any).certificate_expires_at).toLocaleDateString()}
-                                                                </span>
-                                                            )}
-                                                            {/* Show if image expired */}
-                                                            {(item as any).image_expired && (
-                                                                <span className="ml-2 text-yellow-400">• Image expired, regenerating...</span>
-                                                            )}
                                                         </p>
                                                     )}
                                                 </div>
@@ -467,12 +472,102 @@ const PaymentSuccessPage = () => {
                         </div>
                     )}
 
+                    {/* Courses Grid */}
+                    {purchasedCourses.length > 0 && (
+                        <div className="mt-12 mb-12 animate-fade-in-up animation-delay-[900ms]">
+                            <div className="text-center mb-8">
+                                <h2 className="text-2xl md:text-3xl font-bold mb-3 text-white">
+                                    Your Courses are Ready!
+                                </h2>
+                                <p className="text-gray-300 text-lg">
+                                    {purchasedCourses.length === 1
+                                        ? 'Your course is now available on your dashboard.'
+                                        : `All ${purchasedCourses.length} courses are now available on your dashboard.`
+                                    }
+                                </p>
+                            </div>
+
+                            <div className="grid gap-4 md:gap-6">
+                                {purchasedCourses.map((course, index) => (
+                                    <div
+                                        key={index}
+                                        className={`relative z-10 bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-4 md:p-6 hover:bg-white/10 hover:border-white/30 transition-all duration-300 animate-fade-in-up`}
+                                        style={{ animationDelay: `${800 + (index * 100)}ms` }}
+                                    >
+                                        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                                            <div className="flex items-center gap-4 flex-1 w-full">
+                                                <div className="flex-shrink-0">
+                                                    <div className="w-12 h-12 bg-[#FFB800] rounded-lg flex items-center justify-center">
+                                                        <svg viewBox="0 0 24 24" className="w-6 h-6 text-[#021019]">
+                                                            <path fill="currentColor" d="M12,3L1,9L12,15L21,10.09V17H23V9M5,13.18V17.18L12,21L19,17.18V13.18L12,17L5,13.18Z" />
+                                                        </svg>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex-1 min-w-0">
+                                                    <h3 className="text-lg font-bold text-white mb-1">{course.name || course.title}</h3>
+                                                    <p className="text-[#FFB800] font-medium text-sm">{course.description || course.subtitle}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Freebies Grid */}
+                    {purchasedFreebies.length > 0 && (
+                        <div className="mt-12 mb-12 animate-fade-in-up animation-delay-[1000ms]">
+                            <div className="text-center mb-8">
+                                <h2 className="text-2xl md:text-3xl font-bold mb-3 text-white">
+                                    Your Freebies are Ready!
+                                </h2>
+                                <p className="text-gray-300 text-lg">
+                                    {purchasedFreebies.length === 1
+                                        ? 'Your free bonus is ready.'
+                                        : `All ${purchasedFreebies.length} free bonuses are ready.`
+                                    }
+                                </p>
+                            </div>
+
+                            <div className="grid gap-4 md:gap-6">
+                                {purchasedFreebies.map((freebie, index) => (
+                                    <div
+                                        key={index}
+                                        className={`relative z-10 bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-4 md:p-6 hover:bg-white/10 hover:border-white/30 transition-all duration-300 animate-fade-in-up`}
+                                        style={{ animationDelay: `${900 + (index * 100)}ms` }}
+                                    >
+                                        <div className="flex flex-col sm:flex-row sm:items-center gap-4">
+                                            <div className="flex items-center gap-4 flex-1 w-full">
+                                                <div className="flex-shrink-0">
+                                                    <div className="w-12 h-12 bg-blue-500 rounded-lg flex items-center justify-center">
+                                                        <svg viewBox="0 0 24 24" className="w-6 h-6 text-white">
+                                                            <path fill="currentColor" d="M12 2.5L8.42 8.06L2 9.74L6.11 14.88L5.89 21.5L12 19L18.11 21.5L17.89 14.88L22 9.74L15.58 8.06L12 2.5Z" />
+                                                        </svg>
+                                                    </div>
+                                                </div>
+
+                                                <div className="flex-1 min-w-0">
+                                                    <h3 className="text-lg font-bold text-white mb-1">{freebie.name || freebie.title}</h3>
+                                                    <p className="text-blue-400 font-medium text-sm">{freebie.description || freebie.subtitle}</p>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
                     {/* What Next Section */}
                     <div className="mt-16 animate-fade-in-up animation-delay-1000">
                         <div className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-2xl p-8 md:p-10">
                             <h2 className="text-3xl md:text-4xl font-bold text-white mb-6">What next?</h2>
                             <p className="text-lg text-gray-300 mb-8">
-                                Now that you got certified, let's start sharing them around to showcase your proficiency.
+                                {(purchasedCourses.length > 0 || purchasedFreebies.length > 0) 
+                                    ? "Now that your purchase is complete, you can access your certificates, courses, and free bonuses. Let's start by sharing your new certificates to showcase your proficiency."
+                                    : "Now that you got certified, let's start sharing them around to showcase your proficiency."}
                             </p>
 
                             {/* Action Items List */}
@@ -487,6 +582,30 @@ const PaymentSuccessPage = () => {
                                         You will receive certificates on <span className="text-[#98D048] font-medium">{getUserEmail() || 'your email'}</span> in next 10 minutes.
                                     </p>
                                 </div>
+                                {purchasedCourses.length > 0 && (
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-6 h-6 rounded-full bg-[#98D048] flex items-center justify-center flex-shrink-0 mt-0.5">
+                                            <svg viewBox="0 0 24 24" className="w-4 h-4 text-[#021019]">
+                                                <path fill="currentColor" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z" />
+                                            </svg>
+                                        </div>
+                                        <p className="text-white">
+                                            You will receive an email with instructions on how to access your courses shortly.
+                                        </p>
+                                    </div>
+                                )}
+                                {purchasedFreebies.length > 0 && (
+                                    <div className="flex items-start gap-3">
+                                        <div className="w-6 h-6 rounded-full bg-[#98D048] flex items-center justify-center flex-shrink-0 mt-0.5">
+                                            <svg viewBox="0 0 24 24" className="w-4 h-4 text-[#021019]">
+                                                <path fill="currentColor" d="M9,20.42L2.79,14.21L5.62,11.38L9,14.77L18.88,4.88L21.71,7.71L9,20.42Z" />
+                                            </svg>
+                                        </div>
+                                        <p className="text-white">
+                                            You will receive your free bonuses on <span className="text-[#98D048] font-medium">{getUserEmail() || 'your email'}</span>.
+                                        </p>
+                                    </div>
+                                )}
                                 <div className="flex items-start gap-3">
                                     <div className="w-6 h-6 rounded-full border-2 border-[#98D048] flex items-center justify-center flex-shrink-0 mt-0.5">
                                         <div className="w-2 h-2 rounded-full bg-[#98D048]"></div>

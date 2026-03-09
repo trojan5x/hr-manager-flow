@@ -8,6 +8,6 @@ export default defineConfig({
     minify: 'esbuild', // Use esbuild for minification (default)
   },
   esbuild: {
-    drop: ['console', 'debugger'], // Removes all console.* and debugger statements in production
+    // drop: ['console', 'debugger'], // Removes all console.* and debugger statements in production
   },
 })

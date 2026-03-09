@@ -1,7 +1,7 @@
 
 import { useEffect, useState } from 'react';
 import { supabase } from '../../services/supabaseClient';
-import type { PaymentAnalytics } from '../../services/api';
+import type { PaymentAnalytics, DateFilter } from '../../services/api';
 import TopBar from '../../components/TopBar';
 
 interface FunnelStep {
@@ -29,6 +29,10 @@ const FunnelDashboard = () => {
         utmMedium: '',
         role: ''
     });
+
+    // Date filter state
+    const [dateFilter, setDateFilter] = useState<DateFilter>({});
+    const [showDateFilters, setShowDateFilters] = useState(false);
 
     // Available roles state
     const [availableRoles, setAvailableRoles] = useState<string[]>([]);
@@ -165,6 +169,52 @@ const FunnelDashboard = () => {
         }
     };
 
+    const handleDateFilterChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const { name, value } = e.target;
+        
+        if (value) {
+            // When user inputs a local datetime, we need to convert it to UTC for the database
+            // The input gives us the local datetime, we convert it to UTC ISO string
+            const localDate = new Date(value);
+            const utcISOString = localDate.toISOString();
+            
+            setDateFilter(prev => ({
+                ...prev,
+                [name]: utcISOString
+            }));
+            
+            console.log(`${name}: Local input ${value} -> Local Date ${localDate.toLocaleString()} -> UTC ${utcISOString}`);
+        } else {
+            setDateFilter(prev => ({
+                ...prev,
+                [name]: undefined
+            }));
+        }
+    };
+
+    const clearDateFilter = () => {
+        setDateFilter({});
+    };
+
+    const setCommonDateFilter = (days: number) => {
+        const now = new Date();
+        const startDate = new Date();
+        startDate.setDate(startDate.getDate() - days);
+        
+        // Convert to UTC ISO strings for database queries
+        const startDateUTC = startDate.toISOString();
+        const endDateUTC = now.toISOString();
+        
+        setDateFilter({
+            startDate: startDateUTC,
+            endDate: endDateUTC
+        });
+        
+        console.log(`Set ${days} day rolling filter:`);
+        console.log(`Local time range: ${startDate.toLocaleString()} to ${now.toLocaleString()}`);
+        console.log(`UTC range: ${startDateUTC} to ${endDateUTC}`);
+    };
+
     // Effect to fetch role breakdown data when view changes
     useEffect(() => {
         if (showRoleBreakdown && availableRoles.length > 0) {
@@ -172,11 +222,19 @@ const FunnelDashboard = () => {
         }
     }, [showRoleBreakdown, availableRoles, filters.utmSource, filters.utmMedium]);
 
+    // Effect to reload data when date filter changes
+    useEffect(() => {
+        fetchData();
+        if (showRoleBreakdown) {
+            fetchRoleBreakdownData();
+        }
+    }, [dateFilter]);
+
     const fetchData = async () => {
         setLoading(true);
         try {
-            // 1. Get Sessions (Base for filtering)
-            let sessionQuery = supabase.from('sessions').select('*', { count: 'exact', head: false });
+            // 1. Get Sessions (Base for filtering) - Get IDs and count
+            let sessionQuery = supabase.from('sessions').select('id, created_at', { count: 'exact' });
 
             if (filters.utmSource) {
                 sessionQuery = sessionQuery.ilike('utm_source', `%${filters.utmSource}%`);
@@ -187,40 +245,62 @@ const FunnelDashboard = () => {
             if (filters.role) {
                 sessionQuery = sessionQuery.eq('role', filters.role);
             }
+            
+            // Apply date filters
+            if (dateFilter.startDate) {
+                sessionQuery = sessionQuery.gte('created_at', dateFilter.startDate);
+            }
+            if (dateFilter.endDate) {
+                sessionQuery = sessionQuery.lte('created_at', dateFilter.endDate);
+            }
 
-            // We need session IDs if filtering, otherwise we can just count
-            // Fetching IDs for event filtering
-            const { data: sessionData, count: sessionCount, error: sessionError } = await sessionQuery.select('id');
+            const { data: sessionData, count: sessionCount, error: sessionError } = await sessionQuery;
 
             if (sessionError) throw sessionError;
 
             // Extract matching Session IDs and convert to strings (since tracking_events.session_id is text)
             const matchingSessionIds = sessionData?.map(s => s.id.toString()) || [];
+            const totalSessions = sessionCount || 0;
 
-            // If filters are active but no sessions found, everything is 0
-            const hasActiveFilters = filters.utmSource || filters.utmMedium || filters.role;
-            if (hasActiveFilters && matchingSessionIds.length === 0) {
-                setFunnelData([]);
+            console.log(`Found ${totalSessions} sessions matching filters, tracking ${matchingSessionIds.length} session IDs`);
+            console.log('Session ID list:', matchingSessionIds);
+            console.log('Date filter being used:', dateFilter);
+
+            // If no sessions found, everything is 0
+            if (totalSessions === 0 || matchingSessionIds.length === 0) {
+                setFunnelData([
+                    { id: 'sessions', label: 'Total Sessions', count: 0 },
+                    { id: 'begin', label: 'Clicked Begin Assessment', count: 0 },
+                    { id: 'started', label: 'Started Assessment', count: 0 },
+                    { id: 'phase1', label: 'Completed Phase 1', count: 0 },
+                    { id: 'phase2', label: 'Completed Phase 2', count: 0 },
+                    { id: 'phase3', label: 'Completed Phase 3', count: 0 },
+                    { id: 'phase4', label: 'Completed Phase 4', count: 0 },
+                    { id: 'completed', label: 'Assessment Complete', count: 0 },
+                    { id: 'contact', label: 'Submitted Contact', count: 0 },
+                    { id: 'passed', label: 'Passed (>50%)', count: 0 },
+                    { id: 'pay_click', label: 'Initiated Payment', count: 0 },
+                    { id: 'paid', label: 'Payment Success', count: 0 }
+                ]);
+                setPaymentAnalytics({
+                    totalRevenue: 0,
+                    averageOrderValue: 0,
+                    totalOrders: 0,
+                    successfulPayments: 0
+                });
                 setLoading(false);
                 return;
             }
 
-            // 2. Fetch specific events for funnel
-            // 2. Fetch specific events for funnel - UNIQUE SESSION COUNTS ONLY
-            // We'll use a single helper that always counts unique sessions for a given event name
+            // 2. For ALL subsequent metrics, we ONLY look at these specific session IDs
+            // Helper function to get unique session counts for specific events, scoped to our filtered sessions
             const getUniqueSessionCount = async (eventName: string, filterFn?: (evt: any) => boolean) => {
-                let query = supabase
+                const { data } = await supabase
                     .from('tracking_events')
-                    .select('session_id, event_data') // event_data contains the properties
-                    .eq('event_name', eventName);
-
-                if (hasActiveFilters) {
-                    query = query.in('session_id', matchingSessionIds);
-                }
-
-                // We fetch up to a limit. For high volume, a raw SQL query or DB function is better, but this fits the pattern.
-                // 5000 events is a reasonable sample for a dashboard unless scaling >10k sessions.
-                const { data } = await query.limit(5000);
+                    .select('session_id, event_data')
+                    .eq('event_name', eventName)
+                    .in('session_id', matchingSessionIds) // ONLY look at our filtered sessions
+                    .limit(5000);
 
                 if (!data) return 0;
 
@@ -233,18 +313,14 @@ const FunnelDashboard = () => {
                 return uniqueSessions.size;
             };
 
-            // Helper to get UNIQUE Phase completion counts
+            // Helper to get UNIQUE Phase completion counts from our filtered sessions
             const getPhaseUniqueCounts = async () => {
-                let query = supabase
+                const { data } = await supabase
                     .from('tracking_events')
                     .select('event_data, session_id')
-                    .eq('event_name', 'phase_completed');
-
-                if (hasActiveFilters) {
-                    query = query.in('session_id', matchingSessionIds);
-                }
-
-                const { data } = await query.limit(5000);
+                    .eq('event_name', 'phase_completed')
+                    .in('session_id', matchingSessionIds) // ONLY look at our filtered sessions
+                    .limit(5000);
 
                 const phaseSets = { 1: new Set(), 2: new Set(), 3: new Set(), 4: new Set(), 5: new Set() };
 
@@ -265,42 +341,37 @@ const FunnelDashboard = () => {
                 };
             };
 
-            // Get "Contact Submitted"
-            // If sessions table logic, we just check our previously fetched sessionData
+            // Get "Contact Submitted" from our filtered sessions
             const getContactCount = async () => {
-                // Since we already fetched matching sessions (or all) in step 1, we could filter in memory?
-                // But efficient data fetching for "count" if ID list is huge is better via DB.
-                // However, user_id not null check.
-
-                let query = supabase
+                const { count } = await supabase
                     .from('sessions')
                     .select('*', { count: 'exact', head: true })
-                    .not('user_id', 'is', null);
+                    .not('user_id', 'is', null)
+                    .in('id', matchingSessionIds.map(id => parseInt(id, 10))); // Convert back to numbers for session IDs
 
-                if (filters.utmSource) query = query.ilike('utm_source', `%${filters.utmSource}%`);
-                if (filters.utmMedium) query = query.ilike('utm_medium', `%${filters.utmMedium}%`);
-                if (filters.role) query = query.eq('role', filters.role);
-
-                const { count } = await query;
                 return count || 0;
             };
 
-            // Get Passed Count
+            // Get Passed Count from our filtered sessions
             const getPassedCount = async () => {
-                // Query user_assessments table for sessions with is_passed = true
-                let query = supabase
+                const { count } = await supabase
                     .from('user_assessments')
                     .select('session_id', { count: 'exact', head: true })
-                    .eq('is_passed', true);
+                    .eq('is_passed', true)
+                    .in('session_id', matchingSessionIds.map(id => parseInt(id, 10))); // Convert to numbers for user_assessments
 
-                // If we have filtered session IDs, only count those
-                if (hasActiveFilters) {
-                    // Convert matchingSessionIds back to numbers for user_assessments.session_id (bigint)
-                    const sessionIdNumbers = matchingSessionIds.map(id => parseInt(id, 10));
-                    query = query.in('session_id', sessionIdNumbers);
-                }
+                return count || 0;
+            };
 
-                const { count } = await query;
+            // Execute all funnel queries in parallel, scoped to our filtered sessions
+            // Get paid order count from orders table (more reliable than tracking events)
+            const getPaidOrderCount = async () => {
+                const { count } = await supabase
+                    .from('orders')
+                    .select('session_id', { count: 'exact', head: true })
+                    .eq('status', 'paid')
+                    .in('session_id', matchingSessionIds.map(id => parseInt(id, 10)));
+
                 return count || 0;
             };
 
@@ -314,18 +385,18 @@ const FunnelDashboard = () => {
                 paymentCount,
                 paidCount
             ] = await Promise.all([
-                getUniqueSessionCount('click_begin_assessment'), // Correct
-                getUniqueSessionCount('phase_started', (e) => e.event_data?.phase_number === 1), // Only count Phase 1 as "Started Assessment"
+                getUniqueSessionCount('click_begin_assessment'),
+                getUniqueSessionCount('phase_started', (e) => e.event_data?.phase_number === 1),
                 getPhaseUniqueCounts(),
                 getUniqueSessionCount('assessment_completed'),
                 getPassedCount(),
-                getContactCount(), // Use sessions.user_id check for historical accuracy
+                getContactCount(),
                 getUniqueSessionCount('payment_initiated'),
-                getUniqueSessionCount('payment_success')
+                getPaidOrderCount() // Use orders table instead of payment_success events
             ]);
 
             const steps: FunnelStep[] = [
-                { id: 'sessions', label: 'Total Sessions', count: sessionCount || 0 },
+                { id: 'sessions', label: 'Total Sessions', count: totalSessions },
                 { id: 'begin', label: 'Clicked Begin Assessment', count: beginCount },
                 { id: 'started', label: 'Started Assessment', count: startCount },
                 { id: 'phase1', label: 'Completed Phase 1', count: phaseCounts[1] },
@@ -339,69 +410,47 @@ const FunnelDashboard = () => {
                 { id: 'paid', label: 'Payment Success', count: paidCount }
             ];
 
-            // Calculate metrics
+            // Calculate conversion percentages based on total sessions
             const processedSteps = steps.map((step, index) => {
                 if (index === 0) return { ...step, conversion: 100 };
-                // Compare to previous step for conversion
-                const prev = steps[index - 1];
-                // For phases, ideally compare to previous phase, which works in this sequential list.
-                // For Assessment Complete, compare to Phase 5.
-                // For Contact, compare to Assessment Complete.
-                // For Pay, Contact.
-                // Logic holds for simple sequential funnel.
-
-                const conv = prev.count > 0 ? ((step.count / prev.count) * 100).toFixed(1) : '0';
-                return { ...step, conversion: Number(conv) };
+                
+                // Calculate conversion from total sessions for consistency
+                const conversionFromTotal = totalSessions > 0 ? ((step.count / totalSessions) * 100).toFixed(1) : '0';
+                return { ...step, conversion: Number(conversionFromTotal) };
             });
 
             setFunnelData(processedSteps);
 
-            // Fetch recent raw events for debugging
+            // Fetch recent raw events for debugging - also scoped to our sessions
             const { data: events } = await supabase
                 .from('tracking_events')
                 .select('*')
+                .in('session_id', matchingSessionIds)
                 .order('created_at', { ascending: false })
                 .limit(50);
 
             setRecentEvents(events || []);
 
-            // Calculate Payment Analytics with UTM and Role Filters
-            // Query orders table for actual payment data, joined with sessions for filtering
-            let paymentQuery = supabase
+            // Calculate Payment Analytics ONLY from our filtered sessions
+            const { data: paymentData, error: paymentError } = await supabase
                 .from('orders')
-                .select(`
-                    amount, 
-                    status,
-                    razorpay_payment_id,
-                    sessions!inner(
-                        id,
-                        role,
-                        utm_source,
-                        utm_medium
-                    )
-                `)
+                .select('amount, status, razorpay_payment_id, created_at')
                 .eq('status', 'paid')
-                .not('amount', 'is', null);
-
-            // Apply role filter to the joined sessions data
-            if (filters.role) {
-                paymentQuery = paymentQuery.eq('sessions.role', filters.role);
-            }
-
-            // Apply UTM filters to the joined sessions data
-            if (filters.utmSource) {
-                paymentQuery = paymentQuery.ilike('sessions.utm_source', `%${filters.utmSource}%`);
-            }
-            if (filters.utmMedium) {
-                paymentQuery = paymentQuery.ilike('sessions.utm_medium', `%${filters.utmMedium}%`);
-            }
-
-            const { data: paymentData, error: paymentError } = await paymentQuery;
+                .not('amount', 'is', null)
+                .in('session_id', matchingSessionIds.map(id => parseInt(id, 10))); // Convert to numbers for orders table
 
             if (!paymentError && paymentData) {
                 const successfulPayments = paymentData.length;
+                // Fix: Calculate revenue from ORDERS, not purchases
                 const totalRevenue = paymentData.reduce((sum, order) => sum + parseFloat(order.amount || '0'), 0);
                 const averageOrderValue = successfulPayments > 0 ? totalRevenue / successfulPayments : 0;
+
+                console.log('Payment Analytics Debug:', {
+                    filteredSessions: matchingSessionIds.length,
+                    paidOrders: paymentData,
+                    calculatedRevenue: totalRevenue,
+                    calculatedAOV: averageOrderValue
+                });
 
                 setPaymentAnalytics({
                     totalRevenue,
@@ -411,7 +460,6 @@ const FunnelDashboard = () => {
                 });
             } else {
                 console.error('Payment analytics error:', paymentError);
-                // Reset to zero if error or no data
                 setPaymentAnalytics({
                     totalRevenue: 0,
                     averageOrderValue: 0,
@@ -419,6 +467,15 @@ const FunnelDashboard = () => {
                     successfulPayments: 0
                 });
             }
+
+            console.log('Funnel Summary:', {
+                totalSessions,
+                beginCount,
+                completedCount,
+                passedCount,
+                paidCount,
+                totalRevenue: paymentData?.reduce((sum, order) => sum + parseFloat(order.amount || '0'), 0) || 0
+            });
 
         } catch (error) {
             console.error('Dashboard error:', error);
@@ -457,10 +514,155 @@ const FunnelDashboard = () => {
                         >
                             Analytics
                         </a>
+                        <a
+                            href="/admin/user-lookup"
+                            className="py-4 px-1 border-b-2 border-transparent font-medium text-sm text-gray-300 hover:text-white hover:border-gray-300 transition-colors"
+                        >
+                            User Lookup
+                        </a>
                     </nav>
                 </div>
             </div>
             <div className="max-w-6xl mx-auto px-4 py-8">
+                {/* Date Filter Section */}
+                <div className="bg-[#0B2A3D] rounded-xl p-6 border border-gray-700 mb-6">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                        <div>
+                            <h3 className="text-lg font-bold text-white mb-1">Date & Time Filters</h3>
+                            <p className="text-sm text-gray-400">Filter all analytics data by date and time range</p>
+                        </div>
+                        <button
+                            onClick={() => setShowDateFilters(!showDateFilters)}
+                            className="px-4 py-2 bg-[#98D048] text-[#021019] rounded-lg font-medium hover:bg-[#98D048]/90 transition-colors flex items-center gap-2"
+                        >
+                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                            </svg>
+                            {showDateFilters ? 'Hide Date Filters' : 'Show Date Filters'}
+                        </button>
+                    </div>
+
+                    {showDateFilters && (
+                        <div className="mt-6 border-t border-white/10 pt-6">
+                            {/* Quick Filter Buttons */}
+                            <div className="flex flex-wrap gap-2 mb-4">
+                                <button
+                                    onClick={() => setCommonDateFilter(1)}
+                                    className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm transition-colors"
+                                >
+                                    Last 24 hours
+                                </button>
+                                <button
+                                    onClick={() => setCommonDateFilter(7)}
+                                    className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm transition-colors"
+                                >
+                                    Last 7 days
+                                </button>
+                                <button
+                                    onClick={() => setCommonDateFilter(30)}
+                                    className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm transition-colors"
+                                >
+                                    Last 30 days
+                                </button>
+                                <button
+                                    onClick={() => setCommonDateFilter(90)}
+                                    className="px-3 py-1 bg-white/10 hover:bg-white/20 text-white rounded-lg text-sm transition-colors"
+                                >
+                                    Last 3 months
+                                </button>
+                                <button
+                                    onClick={clearDateFilter}
+                                    className="px-3 py-1 bg-red-500/20 hover:bg-red-500/30 text-red-300 rounded-lg text-sm transition-colors"
+                                >
+                                    Clear Date Filter
+                                </button>
+                            </div>
+
+                            {/* Custom Date Range */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                                        Start Date & Time <span className="text-xs text-gray-400">(Your Local Time)</span>
+                                    </label>
+                                    <input
+                                        type="datetime-local"
+                                        name="startDate"
+                                        value={dateFilter.startDate ? (() => {
+                                            const date = new Date(dateFilter.startDate);
+                                            const offset = date.getTimezoneOffset();
+                                            const localDate = new Date(date.getTime() - offset * 60000);
+                                            return localDate.toISOString().slice(0, 16);
+                                        })() : ''}
+                                        onChange={handleDateFilterChange}
+                                        className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:border-[#98D048] text-white"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-300 mb-2">
+                                        End Date & Time <span className="text-xs text-gray-400">(Your Local Time)</span>
+                                    </label>
+                                    <input
+                                        type="datetime-local"
+                                        name="endDate"
+                                        value={dateFilter.endDate ? (() => {
+                                            const date = new Date(dateFilter.endDate);
+                                            const offset = date.getTimezoneOffset();
+                                            const localDate = new Date(date.getTime() - offset * 60000);
+                                            return localDate.toISOString().slice(0, 16);
+                                        })() : ''}
+                                        onChange={handleDateFilterChange}
+                                        className="w-full px-4 py-2 bg-white/10 border border-white/20 rounded-lg focus:outline-none focus:border-[#98D048] text-white"
+                                    />
+                                </div>
+                            </div>
+
+                            {/* Timezone Info */}
+                            <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
+                                <div className="flex items-center gap-2">
+                                    <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                    </svg>
+                                    <span className="text-sm text-blue-400 font-medium">Timezone Info:</span>
+                                    <span className="text-sm text-gray-300">
+                                        Filters use your local time ({Intl.DateTimeFormat().resolvedOptions().timeZone}), automatically converted to UTC for database queries
+                                    </span>
+                                </div>
+                            </div>
+
+                            {/* Active Filter Indicator */}
+                            {(dateFilter.startDate || dateFilter.endDate) && (
+                                <div className="mt-4 p-3 bg-[#98D048]/10 border border-[#98D048]/20 rounded-lg">
+                                    <div className="flex flex-col gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <svg className="w-4 h-4 text-[#98D048]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                            </svg>
+                                            <span className="text-sm text-[#98D048] font-medium">Active Date Filter:</span>
+                                        </div>
+                                        <div className="pl-6 text-sm">
+                                            {dateFilter.startDate && (
+                                                <div className="text-gray-300">
+                                                    <span className="font-medium">From:</span> {new Date(dateFilter.startDate).toLocaleString()} (Local)
+                                                    <br />
+                                                    <span className="text-xs text-gray-400">UTC: {new Date(dateFilter.startDate).toUTCString()}</span>
+                                                </div>
+                                            )}
+                                            {dateFilter.startDate && dateFilter.endDate && <div className="my-1" />}
+                                            {dateFilter.endDate && (
+                                                <div className="text-gray-300">
+                                                    <span className="font-medium">{dateFilter.startDate ? 'To:' : 'Until:'}</span> {new Date(dateFilter.endDate).toLocaleString()} (Local)
+                                                    <br />
+                                                    <span className="text-xs text-gray-400">UTC: {new Date(dateFilter.endDate).toUTCString()}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
                     <div className="flex flex-col gap-2">
                         <h1 className="text-3xl font-bold flex-shrink-0">User Funnel Dashboard</h1>

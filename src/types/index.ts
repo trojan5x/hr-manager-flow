@@ -10,6 +10,11 @@ export interface UrlParamsData {
   utm_term?: string;
 }
 
+export interface DateFilter {
+  startDate?: string;  // ISO string with time
+  endDate?: string;    // ISO string with time
+}
+
 export interface StoredUserData {
   email?: string;
   urlParams?: UrlParamsData;
@@ -476,4 +481,117 @@ export interface ImageGenerationResponse {
   certificates_generated: number;
   certificates_up_to_date: number;
   certificates: ImageGenerationResult[];
+}
+
+// ✨ NEW: User Lookup Types for Admin Conversion Research
+export interface UserLookupProfile {
+  id: number;
+  name: string;
+  email: string;
+  phone_number: string;
+  created_at: string;
+  last_login_at?: string;
+}
+
+export interface UserLookupSession {
+  id: number;
+  utm_source?: string;
+  utm_medium?: string;
+  utm_campaign?: string;
+  utm_content?: string;
+  utm_term?: string;
+  role?: string;
+  created_at: string;
+  user_agent?: string;
+  ip_address?: string;
+}
+
+export interface UserLookupAssessment {
+  id: number;
+  session_id: number;
+  score?: number;
+  is_passed: boolean;
+  is_complete: boolean;
+  time_taken?: number;
+  created_at: string;
+  role_id?: number;
+  current_phase_id?: number;
+  user_answers?: any;
+}
+
+export interface UserLookupOrder {
+  id: string;
+  session_id?: number;
+  amount: number;
+  currency: string;
+  status: string;
+  razorpay_order_id?: string;
+  razorpay_payment_id?: string;
+  created_at: string;
+  metadata?: any;
+}
+
+export interface UserLookupPurchase {
+  id: string;
+  order_id: string;
+  role_certificate_id?: number;
+  purchased_at: string;
+}
+
+export interface UserLookupTimelineEvent {
+  event: string;
+  timestamp: string;
+  session_id?: string;
+  details: any;
+}
+
+export interface UserLookupData {
+  profile: UserLookupProfile;
+  sessions: UserLookupSession[];
+  assessments: UserLookupAssessment[];
+  orders: UserLookupOrder[];
+  purchases: UserLookupPurchase[];
+  timeline: UserLookupTimelineEvent[];
+  conversionStatus: {
+    hasAssessment: boolean;
+    hasPassedAssessment: boolean;
+    hasOrder: boolean;
+    hasPaidOrder: boolean;
+    hasPurchase: boolean;
+  };
+}
+
+export interface UserLookupResponse {
+  result: 'success' | 'error' | 'not_found';
+  message: string;
+  data: UserLookupData | null;
+}
+
+// ✨ NEW: Pack-based Purchase Types
+export interface PackDeliverables {
+  certificates: Array<{
+    id: number;
+    name: string;
+    type: string;
+    tier: string;
+  }>;
+  courses: Array<{
+    name: string;
+    description: string;
+    type: string;
+  }>;
+  freeItems: Array<{
+    name: string;
+    description: string;
+    type: string;
+  }>;
+}
+
+export interface PackData {
+  id: string;
+  title: string;
+  current: number;
+  certs: Array<{ certItem: CertificationItem }>;
+  courses: Array<{ title: string; subtitle: string }>;
+  freeItems: Array<{ title: string; subtitle: string }>;
 }

@@ -17,11 +17,13 @@ import PaymentSuccessPage from './pages/PaymentSuccessPage';
 import SimpleResultsPage from './pages/SimpleResultsPage';
 import ResultsPageV2 from './pages/ResultsPageV2';
 import ResultsPageV3 from './pages/ResultsPageV3';
+import ResultsPageV4 from './pages/ResultsPageV4';
 // import AssessmentPageVariant from './pages/AssessmentPageVariant';
 import AssessmentPage from './pages/AssessmentPage';
 import FunnelDashboard from './pages/admin/FunnelDashboard';
 import FunnelDashboardComparison from './pages/admin/FunnelDashboardComparison';
 import RoleGeneratorDashboard from './pages/admin/RoleGeneratorDashboard';
+import UserLookupDashboard from './pages/admin/UserLookupDashboard';
 
 import AdminDashboard from './pages/AdminDashboard'; // ✨ NEW
 
@@ -31,6 +33,7 @@ function App() {
       <Route path="/" element={<HomeOrRole />} />
       <Route path="/admin/certificates" element={<AdminDashboard />} /> {/* ✨ NEW */}
       <Route path="/admin/role-generator" element={<RoleGeneratorDashboard />} /> {/* ✨ NEW */}
+      <Route path="/admin/user-lookup" element={<UserLookupDashboard />} /> {/* ✨ NEW */}
       <Route path="/design-system" element={<DesignSystem />} />
       <Route path="/select-skills" element={<SelectSkillsPage />} />
       <Route path="/loading" element={<LoadingPage />} />
@@ -42,6 +45,7 @@ function App() {
       <Route path="/results-v2" element={<SimpleResultsPage />} />
       <Route path="/results-v2-page" element={<ResultsPageV2 />} />
       <Route path="/results-v3" element={<ResultsPageV3 />} />
+      <Route path="/results-v4" element={<ResultsPageV4 />} />
       <Route path="/assessment-variant" element={<AssessmentPage />} />
       <Route path="/role-variant" element={<RolePageVariant />} />
       <Route path="/admin/dashboard" element={<FunnelDashboard />} />
@@ -62,8 +66,8 @@ function ResultsRouter() {
     return <SimpleResultsPage />;
   }
 
-  // Default to ResultsPageV3
-  return <ResultsPageV3 />;
+  // Default to ResultsPageV4 (with V3 as backup at /results-v3)
+  return <ResultsPageV4 />;
 }
 
 function HomeOrRole() {

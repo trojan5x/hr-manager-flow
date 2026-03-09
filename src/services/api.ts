@@ -18,9 +18,14 @@ import type {
   CertifiedUserData,
   CertificateRecord,
   RoleData,
-  DeliverableItem
+  DeliverableItem,
+  UserLookupData,
+  UserLookupResponse,
+  PackDeliverables,
+  CertificationItem,
+  DateFilter
 } from '../types';
-export type { CertificationItem, BundleProductData } from '../types';
+export type { CertificationItem, BundleProductData, UserLookupData, UserLookupResponse, DateFilter } from '../types';
 import { HR_MANAGER_ROLE, MOCK_ASSESSMENT, MOCK_BUNDLE_PRODUCTS } from '../data/staticData';
 // =============================================================================
 // =============================================================================
@@ -864,6 +869,59 @@ export const createPaymentOrder = async (
 };
 
 /**
+ * Create Pack Payment Order via Supabase Edge Function
+ */
+export const createPackPaymentOrder = async (
+    amount: number,
+    packName: string,
+    deliverables: PackDeliverables,
+    detailedItems: CertificationItem[],
+    additionalNotes: any = {}
+) => {
+  try {
+    const requestBody = {
+      amount: amount * 100, // Convert to paise (multiply by 100)
+      currency: 'INR',
+      notes: {
+        project_name: 'specialized_platform_main',
+        purchased_products: packName,
+        pack_deliverables: JSON.stringify(deliverables), // NEW: Complete promise to user
+        detailed_items: JSON.stringify(detailedItems),
+        purchase_type: 'PACK',
+        ...additionalNotes // Spread the additional notes (user details, etc.)
+      }
+    };
+
+    console.log('Creating pack order via Supabase edge function:', requestBody);
+
+    const response = await fetch(`${SUPABASE_URL}/functions/v1/create-razorpay-order`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+        'apikey': SUPABASE_ANON_KEY
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error('Supabase edge function error:', errorText);
+      throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+    }
+
+    const result = await response.json();
+    console.log('Supabase edge function response:', result);
+    
+    // The Supabase edge function returns the Razorpay order object directly
+    return result; 
+  } catch (error) {
+    console.error('Error creating pack payment order via Supabase:', error);
+    throw error;
+  }
+};
+
+/**
  * Check Payment Status - MOCK
  */
 export const checkPaymentStatus = async (orderId: number) => {
@@ -993,22 +1051,35 @@ export interface PaymentAnalytics {
     averageOrderValue: number;
     totalOrders: number;
     successfulPayments: number;
+    totalAssessments?: number;
+    totalCertificates?: number;
+    conversionRate?: number;
 }
 
 /**
  * Get Payment Analytics - For Admin Dashboard
- * Fetches all successful payments and calculates metrics
+ * Fetches all successful payments and calculates metrics with optional date filtering
  */
-export const getPaymentAnalytics = async (): Promise<PaymentAnalytics> => {
+export const getPaymentAnalytics = async (dateFilter?: DateFilter): Promise<PaymentAnalytics> => {
     try {
-        const { data, error } = await supabase
-            .from('sessions')
-            .select('amount_paid, is_paid, payment_id')
-            .eq('is_paid', true)
-            .not('amount_paid', 'is', null);
+        // Base query for orders with payments
+        let ordersQuery = supabase
+            .from('orders')
+            .select('amount, created_at, status')
+            .eq('status', 'paid');
 
-        if (error) {
-            console.error('Error fetching payment analytics:', error);
+        // Apply date filters if provided
+        if (dateFilter?.startDate) {
+            ordersQuery = ordersQuery.gte('created_at', dateFilter.startDate);
+        }
+        if (dateFilter?.endDate) {
+            ordersQuery = ordersQuery.lte('created_at', dateFilter.endDate);
+        }
+
+        const { data: orders, error: ordersError } = await ordersQuery;
+
+        if (ordersError) {
+            console.error('Error fetching payment analytics:', ordersError);
             return {
                 totalRevenue: 0,
                 averageOrderValue: 0,
@@ -1017,16 +1088,50 @@ export const getPaymentAnalytics = async (): Promise<PaymentAnalytics> => {
             };
         }
 
+        // Base query for assessments
+        let assessmentsQuery = supabase
+            .from('user_assessments')
+            .select('created_at, is_complete');
+
+        if (dateFilter?.startDate) {
+            assessmentsQuery = assessmentsQuery.gte('created_at', dateFilter.startDate);
+        }
+        if (dateFilter?.endDate) {
+            assessmentsQuery = assessmentsQuery.lte('created_at', dateFilter.endDate);
+        }
+
+        const { data: assessments } = await assessmentsQuery;
+
+        // Base query for certificates
+        let certificatesQuery = supabase
+            .from('user_certificates')
+            .select('created_at, status');
+
+        if (dateFilter?.startDate) {
+            certificatesQuery = certificatesQuery.gte('created_at', dateFilter.startDate);
+        }
+        if (dateFilter?.endDate) {
+            certificatesQuery = certificatesQuery.lte('created_at', dateFilter.endDate);
+        }
+
+        const { data: certificates } = await certificatesQuery;
+
         // Calculate metrics
-        const successfulPayments = data?.length || 0;
-        const totalRevenue = data?.reduce((sum, session) => sum + (session.amount_paid || 0), 0) || 0;
+        const successfulPayments = orders?.length || 0;
+        const totalRevenue = orders?.reduce((sum, order) => sum + (Number(order.amount) || 0), 0) || 0;
         const averageOrderValue = successfulPayments > 0 ? totalRevenue / successfulPayments : 0;
+        const totalAssessments = assessments?.length || 0;
+        const totalCertificates = certificates?.length || 0;
+        const conversionRate = totalAssessments > 0 ? (successfulPayments / totalAssessments) * 100 : 0;
 
         return {
             totalRevenue,
-            averageOrderValue: Math.round(averageOrderValue * 100) / 100, // Round to 2 decimal places
+            averageOrderValue: Math.round(averageOrderValue * 100) / 100,
             totalOrders: successfulPayments,
-            successfulPayments
+            successfulPayments,
+            totalAssessments,
+            totalCertificates,
+            conversionRate: Math.round(conversionRate * 100) / 100
         };
     } catch (e) {
         console.error('Exception fetching payment analytics:', e);
@@ -1763,6 +1868,53 @@ export const getUserCertificatesForPayment = async (sessionId: string, paymentId
     }
 };
 
+export const getPackDeliverablesForPayment = async (orderId: string) => {
+    console.log(`API: Fetching pack deliverables for order ${orderId}`);
+    try {
+        const { data: orderData, error: orderError } = await supabase
+            .from('orders')
+            .select('id, metadata')
+            .eq('id', orderId)
+            .single();
+
+        if (orderError || !orderData) {
+            console.error('Failed to get order data:', orderError);
+            return null;
+        }
+
+        // Try from metadata first
+        if (orderData.metadata && orderData.metadata.pack_deliverables) {
+             const deliverables = typeof orderData.metadata.pack_deliverables === 'string' 
+                ? JSON.parse(orderData.metadata.pack_deliverables)
+                : orderData.metadata.pack_deliverables;
+             return deliverables;
+        }
+
+        // If not in metadata, fetch from grants tables
+        const { data: courseGrants, error: courseError } = await supabase
+            .from('course_grants')
+            .select('course_name, course_description')
+            .eq('order_id', orderData.id);
+
+        const { data: freeGrants, error: freeError } = await supabase
+            .from('free_item_grants')
+            .select('item_name, item_description')
+            .eq('order_id', orderData.id);
+
+        if (!courseError && !freeError) {
+            return {
+                courses: (courseGrants || []).map(c => ({ name: c.course_name, description: c.course_description })),
+                freeItems: (freeGrants || []).map(f => ({ name: f.item_name, description: f.item_description }))
+            };
+        }
+
+        return null;
+    } catch (error) {
+        console.error('Error in getPackDeliverablesForPayment:', error);
+        return null;
+    }
+};
+
 /**
  * Get User Certificates by User ID
  */
@@ -1798,5 +1950,172 @@ export const getUserCertificatesByUserId = async (userId: number) => {
     } catch (error) {
         console.error('Error in getUserCertificatesByUserId:', error);
         return [];
+    }
+};
+
+/**
+ * Get comprehensive user data by email for admin conversion research calls
+ */
+export const getUserByEmail = async (email: string): Promise<UserLookupResponse> => {
+    console.log(`API: Looking up user data for email: ${email}`);
+    
+    try {
+        // 1. Get user profile
+        const { data: userData, error: userError } = await supabase
+            .from('users')
+            .select('id, name, email, phone_number, created_at, last_login_at')
+            .eq('email', email)
+            .single();
+
+        if (userError || !userData) {
+            console.log('User not found:', userError);
+            return {
+                result: 'not_found',
+                message: 'User not found with this email',
+                data: null
+            };
+        }
+
+        const userId = userData.id;
+        console.log(`Found user ${userId}, fetching additional data...`);
+
+        // 2. Get all sessions for this user
+        const { data: sessionsData, error: sessionsError } = await supabase
+            .from('sessions')
+            .select('id, utm_source, utm_medium, utm_campaign, utm_content, utm_term, role, created_at, user_agent, ip_address')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+        if (sessionsError) {
+            console.warn('Error fetching sessions:', sessionsError);
+        }
+
+        const sessions = sessionsData || [];
+        const sessionIds = sessions.map(s => s.id);
+
+        // 3. Get all assessments for this user
+        const { data: assessmentsData, error: assessmentsError } = await supabase
+            .from('user_assessments')
+            .select('id, session_id, score, is_passed, is_complete, time_taken, created_at, role_id, current_phase_id, user_answers')
+            .eq('user_id', userId)
+            .order('created_at', { ascending: false });
+
+        if (assessmentsError) {
+            console.warn('Error fetching assessments:', assessmentsError);
+        }
+
+        const assessments = assessmentsData || [];
+
+        // 4. Get all orders for this user (both user_id and session_id based)
+        let ordersData = [];
+        if (sessionIds.length > 0) {
+            const { data: sessionOrders, error: sessionOrdersError } = await supabase
+                .from('orders')
+                .select('id, user_id, session_id, amount, currency, status, razorpay_order_id, razorpay_payment_id, created_at, metadata')
+                .or(`user_id.eq.${userId},session_id.in.(${sessionIds.join(',')})`)
+                .order('created_at', { ascending: false });
+
+            if (sessionOrdersError) {
+                console.warn('Error fetching orders:', sessionOrdersError);
+            }
+            ordersData = sessionOrders || [];
+        } else {
+            const { data: userOrders, error: userOrdersError } = await supabase
+                .from('orders')
+                .select('id, user_id, session_id, amount, currency, status, razorpay_order_id, razorpay_payment_id, created_at, metadata')
+                .eq('user_id', userId)
+                .order('created_at', { ascending: false });
+
+            if (userOrdersError) {
+                console.warn('Error fetching orders:', userOrdersError);
+            }
+            ordersData = userOrders || [];
+        }
+
+        // 5. Get all purchases for this user
+        const { data: purchasesData, error: purchasesError } = await supabase
+            .from('purchases')
+            .select('id, order_id, role_certificate_id, purchased_at')
+            .eq('user_id', userId)
+            .order('purchased_at', { ascending: false });
+
+        if (purchasesError) {
+            console.warn('Error fetching purchases:', purchasesError);
+        }
+
+        const purchases = purchasesData || [];
+
+        // 6. Get tracking events timeline (limit to recent events to avoid overwhelming data)
+        interface TimelineEvent {
+            event: string;
+            timestamp: string;
+            session_id: string;
+            details: {
+                page_url?: string;
+                [key: string]: any;
+            };
+        }
+        
+        let timelineEvents: TimelineEvent[] = [];
+        if (sessionIds.length > 0) {
+            const { data: eventsData, error: eventsError } = await supabase
+                .from('tracking_events')
+                .select('event_name, event_data, session_id, created_at, page_url')
+                .in('session_id', sessionIds.map(id => id.toString()))
+                .order('created_at', { ascending: false })
+                .limit(50); // Limit to recent 50 events
+
+            if (eventsError) {
+                console.warn('Error fetching tracking events:', eventsError);
+            }
+
+            timelineEvents = (eventsData || []).map(event => ({
+                event: event.event_name,
+                timestamp: event.created_at,
+                session_id: event.session_id,
+                details: {
+                    ...event.event_data,
+                    page_url: event.page_url
+                }
+            }));
+        }
+
+        // 7. Calculate conversion status
+        const hasAssessment = assessments.length > 0;
+        const hasPassedAssessment = assessments.some(a => a.is_passed);
+        const hasOrder = ordersData.length > 0;
+        const hasPaidOrder = ordersData.some(o => o.status === 'paid');
+        const hasPurchase = purchases.length > 0;
+
+        const lookupData: UserLookupData = {
+            profile: userData,
+            sessions,
+            assessments,
+            orders: ordersData,
+            purchases,
+            timeline: timelineEvents,
+            conversionStatus: {
+                hasAssessment,
+                hasPassedAssessment,
+                hasOrder,
+                hasPaidOrder,
+                hasPurchase
+            }
+        };
+
+        console.log('User lookup completed successfully for:', email);
+        return {
+            result: 'success',
+            message: 'User data retrieved successfully',
+            data: lookupData
+        };
+
+    } catch (error) {
+        console.error('Error in getUserByEmail:', error);
+        return {
+            result: 'error',
+            message: 'Failed to retrieve user data',
+            data: null
+        };
     }
 };
