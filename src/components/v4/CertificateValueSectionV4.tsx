@@ -134,7 +134,7 @@ const CertificateValueSectionV4: React.FC<CertificateValueSectionProps> = ({
                     <div className="text-center">
                         {/* Traditional Company Logos - Now supporting context */}
                         <div className="pt-2">
-                            <p className="text-gray-500 text-xs uppercase tracking-widest mb-3">Professionals from these companies trust our certifications</p>
+                            <p className="text-gray-500 text-xs uppercase tracking-widest mb-3 max-w-xs mx-auto">Recognized by Recruiters from 1120+ top companies like</p>
                             <div className="flex flex-nowrap justify-center items-center gap-8 md:gap-16 opacity-70 grayscale hover:grayscale-0 transition-all duration-500">
                                 {companies.map((company, index) => (
                                     <img

@@ -3,6 +3,17 @@ import React, { useState, useEffect } from 'react';
 // Add imports at top
 import type { CertificationItem, PackData } from '../../types';
 import { CertificateHtmlRenderer } from '../CertificateHtmlRenderer';
+import { 
+    CheckCircle2, 
+    Linkedin, 
+    BookOpen, 
+    FileText, 
+    Zap, 
+    Award, 
+    Brain,
+    Play,
+    Plus
+} from 'lucide-react';
 
 // 🧪 TEST FLAG: Set to true to use test pricing (₹1, ₹2, ₹3)
 const USE_TEST_PRICING = false;
@@ -24,7 +35,7 @@ interface BundleSectionProps {
 }
 
 // Fallback certificate data when no real certificates are available
-const getFallbackCertificates = (tier: 'essential' | 'professional' | 'executive', role: string = 'Professional'): CertificationItem[] => {
+const getFallbackCertificates = (tier: 'essential' | 'professional' | 'executive' | 'ai-ready', role: string = 'Professional'): CertificationItem[] => {
     const baseCerts: CertificationItem[] = [
         {
             skill_id: 1,
@@ -46,8 +57,6 @@ const getFallbackCertificates = (tier: 'essential' | 'professional' | 'executive
         }
     ];
 
-    if (tier === 'essential') return baseCerts;
-
     const aiCert: CertificationItem = {
         skill_id: 5,
         certification_name: `AI for ${role} Certification`,
@@ -57,6 +66,9 @@ const getFallbackCertificates = (tier: 'essential' | 'professional' | 'executive
         order_index: 5,
         certificate_preview_url: '/assets/specialised-cert-empty.png'
     };
+
+    if (tier === 'essential') return baseCerts;
+    if (tier === 'ai-ready') return [aiCert];
 
     if (tier === 'professional') return [...baseCerts, aiCert];
 
@@ -85,7 +97,7 @@ const getFallbackCertificates = (tier: 'essential' | 'professional' | 'executive
 };
 
 // Certificate filtering utility functions
-const getCertificatesByTier = (tier: 'essential' | 'professional' | 'executive', certifications: CertificationItem[], role: string = 'Professional'): CertificationItem[] => {
+const getCertificatesByTier = (tier: 'essential' | 'professional' | 'executive' | 'ai-ready', certifications: CertificationItem[], role: string = 'Professional'): CertificationItem[] => {
     // Sort certificates by order_index to maintain consistent display order
     const sortedCerts = certifications && certifications.length > 0 
         ? [...certifications].sort((a, b) => (a.order_index || 0) - (b.order_index || 0)) 
@@ -122,10 +134,10 @@ const getCertificatesByTier = (tier: 'essential' | 'professional' | 'executive',
             return pad(realPrimary, fallbackPrimary, 2);
         
         case 'professional':
-            // 2 primary + 1 AI certificate
+            // 2 primary + 2 secondary certificates
             return [
                 ...pad(realPrimary, fallbackPrimary, 2),
-                ...pad(realAi, fallbackAi, 1)
+                ...pad(realSecondary, fallbackSecondary, 2)
             ];
         
         case 'executive':
@@ -135,54 +147,66 @@ const getCertificatesByTier = (tier: 'essential' | 'professional' | 'executive',
                 ...pad(realSecondary, fallbackSecondary, 2),
                 ...pad(realAi, fallbackAi, 1)
             ];
+
+        case 'ai-ready':
+            // 2 core certificates + 1 AI certificate
+            return [
+                ...pad(realPrimary, fallbackPrimary, 2),
+                ...pad(realAi, fallbackAi, 1)
+            ];
         
         default:
             return [];
     }
 };
 
-// --- New UI Components for Packs ---
+// --- Updated Lucide React Icons ---
 const CheckIcon = () => (
-    <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
-        <circle cx="8" cy="8" r="8" fill="#7FC241" opacity="0.2" />
-        <circle cx="8" cy="8" r="6" fill="#7FC241" />
-        <path d="M5 8l2 2 4-4" stroke="#000" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className="w-4 h-4 text-green-500">
+        <CheckCircle2 size={16} />
+    </div>
 );
 
 const LinkedInIcon = () => (
-    <svg width="20" height="20" viewBox="0 0 16 16" fill="none">
-        <rect width="16" height="16" rx="4" fill="#0A66C2" />
-        <path d="M3.5 6h2v6.5h-2V6zm1-1.5a1 1 0 110-2 1 1 0 010 2zM7 6h1.9v.9h.03C9.2 6.4 10 5.9 11.2 5.9c2.1 0 2.5 1.4 2.5 3.2v3.4h-2V9.6c0-.8 0-1.8-1.1-1.8s-1.3.9-1.3 1.7v3h-2V6z" fill="white" />
-    </svg>
+    <div className="w-4 h-4 text-blue-600">
+        <Linkedin size={16} />
+    </div>
 );
 
 const CourseIcon = () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-        <rect width="24" height="24" rx="6" fill="#4FC3F7" opacity="0.15" />
-        <path d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253" stroke="#4FC3F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className="w-4 h-4 text-blue-500">
+        <BookOpen size={16} />
+    </div>
 );
 
 const ResumeIcon = () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-        <rect width="24" height="24" rx="6" fill="#FACC15" opacity="0.15" />
-        <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke="#FACC15" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className="w-4 h-4 text-yellow-500">
+        <FileText size={16} />
+    </div>
 );
 
 const ProPlanIcon = () => (
-    <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-        <rect width="24" height="24" rx="6" fill="#A855F7" opacity="0.15" />
-        <path d="M13 10V3L4 14h7v7l9-11h-7z" stroke="#A855F7" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
+    <div className="w-4 h-4 text-purple-500">
+        <Zap size={16} />
+    </div>
+);
+
+const TrustedIcon = () => (
+    <div className="w-4 h-4 text-green-600">
+        <Award size={16} />
+    </div>
+);
+
+const AIIcon = () => (
+    <div className="w-4 h-4 text-red-500">
+        <Brain size={16} />
+    </div>
 );
 
 const PlayIcon = () => (
-    <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-        <rect width="28" height="28" rx="6" fill="#0A66C2" opacity="0.15" />
-        <path d="M11 9l9 5-9 5V9z" fill="#0A66C2" />
-    </svg>
+    <div className="w-6 h-6 text-blue-600">
+        <Play size={24} fill="currentColor" />
+    </div>
 );
 
 const ChevronIcon = ({ open }: { open: boolean }) => (
@@ -196,24 +220,39 @@ const ChevronIcon = ({ open }: { open: boolean }) => (
 
 const Badge = ({ label }: { label: string }) => {
     const styles: Record<string, any> = {
-        "GOOD START": { color: "#4A90E2", border: "1px solid rgba(74,144,226,0.3)", background: "transparent" },
-        "MOST POPULAR": { color: "#c084fc", border: "1px solid rgba(168,85,247,0.3)", background: "transparent" },
-        "AI READY": { color: "#7FC241", border: "1px solid rgba(127,194,65,0.3)", background: "transparent" },
+        "CORE": { 
+            color: "#60A5FA", 
+            border: "1px solid rgba(74,144,226,0.6)", 
+            background: "rgba(74,144,226,0.2)" 
+        },
+        "RECOMMENDED": { 
+            color: "#60A5FA", 
+            border: "1px solid rgba(59,130,246,0.6)", 
+            background: "rgba(59,130,246,0.2)" 
+        },
+        "ALL IN ONE": { 
+            color: "#C084FC", 
+            border: "1px solid rgba(168,85,247,0.6)", 
+            background: "rgba(168,85,247,0.2)" 
+        },
+        "AI READY": { 
+            color: "#F472B6", 
+            border: "1px solid rgba(236,72,153,0.6)", 
+            background: "rgba(236,72,153,0.2)" 
+        },
     };
     return (
-        <span className="text-[9px] sm:text-[10px] font-bold tracking-[0.08em] uppercase font-sans whitespace-nowrap" style={{
-            padding: "4px 8px", borderRadius: 4,
-            ...(styles[label] || {})
-        }}>{label}</span>
+        <span 
+            className="text-[10px] font-bold tracking-[0.08em] uppercase font-sans whitespace-nowrap px-2 py-1 rounded-md" 
+            style={{
+                ...(styles[label] || {}),
+                boxShadow: '0 1px 3px rgba(0, 0, 0, 0.3)'
+            }}
+        >
+            {label}
+        </span>
     );
 };
-
-const FeaturePill = ({ icon, label }: { icon: React.ReactNode, label: string }) => (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 12px", background: "rgba(2,28,48,0.6)", borderRadius: "8px", border: "1px solid rgba(255,255,255,0.05)", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}>
-        <div style={{ flexShrink: 0, display: "flex" }}>{icon}</div>
-        <span className="text-[12px] sm:text-[13px] font-semibold text-slate-200 font-sans leading-tight">{label}</span>
-    </div>
-);
 
 const SectionLabel = ({ children }: { children: React.ReactNode }) => (
     <div className="flex items-center gap-2 mt-5 mb-3">
@@ -277,50 +316,31 @@ const FreeBox = ({ items }: { items: any[] }) => (
     </div>
 );
 
-const PriceRow = ({ original, current, title, onBuy, isLoading }: { original: number, current: number, title: string, onBuy?: () => void, isLoading?: boolean }) => (
-    <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 12, marginTop: 16 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-            <span style={{ fontSize: 14, color: "#f87171", textDecoration: "line-through", fontFamily: "'DM Sans', sans-serif" }}>
-                ₹{original.toLocaleString("en-IN")}
-            </span>
-            <span style={{ fontSize: 32, fontWeight: 900, color: "#ffffff", fontFamily: "'DM Sans', sans-serif", letterSpacing: "-0.02em" }}>
-                ₹{current.toLocaleString("en-IN")}
-            </span>
-        </div>
-        <button
-            onClick={(e) => { e.stopPropagation(); onBuy?.(); }}
-            disabled={isLoading}
-            className="w-full sm:w-auto font-sans flex-1 sm:flex-none min-w-[200px]"
-            style={{
-                background: "#7FC241", color: "#000000",
-                border: "none", borderRadius: 8,
-                padding: "12px 20px",
-                fontSize: 15, fontWeight: 800,
-                cursor: isLoading ? "not-allowed" : "pointer", 
-                letterSpacing: "0.01em",
-                boxShadow: "0 2px 12px rgba(127,194,65,0.2)",
-                transition: "background 0.15s ease",
-                opacity: isLoading ? 0.7 : 1,
-            }}
-            onMouseEnter={e => !isLoading && (e.currentTarget.style.background = "#8cd34a")}
-            onMouseLeave={e => !isLoading && (e.currentTarget.style.background = "#7FC241")}
-        >
-            {isLoading ? "Processing..." : `Purchase ${title}`}
-        </button>
-    </div>
-);
+const RadioDot = ({ selected, tier }: { selected: boolean, tier?: string }) => {
+    const getRadioColor = (tier?: string) => {
+        const colors = {
+            essential: '#4A90E2',     // Light blue
+            professional: '#3B82F6',  // Brighter blue for contrast against dark blue card
+            executive: '#A855F7',      // Purple
+            'ai-ready': '#EC4899'     // Pink/magenta for AI
+        };
+        return colors[tier as keyof typeof colors] || '#7FC241';
+    };
 
-const RadioDot = ({ selected }: { selected: boolean }) => (
-    <div style={{
-        width: 22, height: 22, borderRadius: "50%",
-        border: selected ? "2px solid #7FC241" : "2px solid rgba(255,255,255,0.2)",
-        display: "flex", alignItems: "center", justifyContent: "center",
-        flexShrink: 0, transition: "all 0.3s ease",
-        background: "transparent"
-    }}>
-        {selected && <div style={{ width: 12, height: 12, borderRadius: "50%", background: "#7FC241" }} />}
-    </div>
-);
+    const radioColor = getRadioColor(tier);
+
+    return (
+        <div style={{
+            width: 22, height: 22, borderRadius: "50%",
+            border: selected ? `2px solid ${radioColor}` : "2px solid rgba(255,255,255,0.3)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            flexShrink: 0, transition: "all 0.3s ease",
+            background: "transparent"
+        }}>
+            {selected && <div style={{ width: 12, height: 12, borderRadius: "50%", background: radioColor }} />}
+        </div>
+    );
+};
 
 function PackCard({ 
     id, title, badge, features, certs, courses, freeItems, original, current, 
@@ -338,77 +358,299 @@ function PackCard({
         }
     };
 
+    // Pack descriptions
+    const getPackDescription = (packId: string) => {
+        switch (packId) {
+            case 'essential':
+                return 'Start your certification journey with industry-recognized credentials';
+            case 'professional':
+                return 'Level up with AI skills, bonus tools, and comprehensive training';
+            case 'executive':
+                return 'Master advanced skills with premium features and exclusive perks';
+            case 'ai-ready':
+                return 'Core certifications plus specialized AI training for future readiness';
+            default:
+                return 'Complete certification package with comprehensive training';
+        }
+    };
+
+    // Get tier-specific gradients
+    const getTierGradients = (packId: string, selected: boolean) => {
+        const gradients = {
+            essential: {
+                background: selected 
+                    ? `linear-gradient(135deg, rgba(16, 71, 125, 0.95) 0%, rgba(8, 41, 74, 0.95) 100%) padding-box,
+                       linear-gradient(135deg, #4A90E2 0%, #2563EB 100%) border-box`
+                    : `linear-gradient(135deg, rgba(16, 71, 125, 0.4) 0%, rgba(8, 41, 74, 0.6) 100%) padding-box,
+                       linear-gradient(135deg, rgba(74, 144, 226, 0.6) 0%, rgba(37, 99, 235, 0.4) 100%) border-box`,
+                shadow: selected 
+                    ? '0 0 25px rgba(74, 144, 226, 0.4), 0 8px 25px rgba(0,0,0,0.3)'
+                    : '0 4px 15px rgba(74, 144, 226, 0.15)'
+            },
+            professional: {
+                background: selected 
+                    ? `linear-gradient(135deg, rgba(30, 58, 138, 0.95) 0%, rgba(15, 35, 87, 0.95) 100%) padding-box,
+                       linear-gradient(135deg, #1E3A8A 0%, #1E40AF 100%) border-box`
+                    : `linear-gradient(135deg, rgba(30, 58, 138, 0.4) 0%, rgba(15, 35, 87, 0.6) 100%) padding-box,
+                       linear-gradient(135deg, rgba(30, 58, 138, 0.6) 0%, rgba(30, 64, 175, 0.4) 100%) border-box`,
+                shadow: selected 
+                    ? '0 0 25px rgba(30, 58, 138, 0.4), 0 8px 25px rgba(0,0,0,0.3)'
+                    : '0 4px 15px rgba(30, 58, 138, 0.15)'
+            },
+            executive: {
+                background: selected 
+                    ? `linear-gradient(135deg, rgba(88, 28, 135, 0.95) 0%, rgba(59, 7, 100, 0.95) 100%) padding-box,
+                       linear-gradient(135deg, #A855F7 0%, #7C3AED 100%) border-box`
+                    : `linear-gradient(135deg, rgba(88, 28, 135, 0.4) 0%, rgba(59, 7, 100, 0.6) 100%) padding-box,
+                       linear-gradient(135deg, rgba(168, 85, 247, 0.6) 0%, rgba(124, 58, 237, 0.4) 100%) border-box`,
+                shadow: selected 
+                    ? '0 0 25px rgba(168, 85, 247, 0.4), 0 8px 25px rgba(0,0,0,0.3)'
+                    : '0 4px 15px rgba(168, 85, 247, 0.15)'
+            },
+            'ai-ready': {
+                background: selected 
+                    ? `linear-gradient(135deg, rgba(190, 24, 93, 0.95) 0%, rgba(136, 19, 55, 0.95) 100%) padding-box,
+                       linear-gradient(135deg, #EC4899 0%, #BE185D 100%) border-box`
+                    : `linear-gradient(135deg, rgba(190, 24, 93, 0.5) 0%, rgba(136, 19, 55, 0.7) 100%) padding-box,
+                       linear-gradient(135deg, rgba(236, 72, 153, 0.7) 0%, rgba(190, 24, 93, 0.5) 100%) border-box`,
+                shadow: selected 
+                    ? '0 0 25px rgba(236, 72, 153, 0.4), 0 8px 25px rgba(0,0,0,0.3)'
+                    : '0 4px 15px rgba(236, 72, 153, 0.15)'
+            }
+        };
+
+        return gradients[packId as keyof typeof gradients] || gradients.professional;
+    };
+
+    const tierStyle = getTierGradients(id, isSelected);
+
+    // Handle card click - first align, then select and expand
+    const handleCardClick = () => {
+        onSelect(id);
+        if (!isExpanded) {
+            // First scroll to align card with top of screen (with 16px offset)
+            const cardElement = document.querySelector(`[data-pack-id="${id}"]`);
+            if (cardElement) {
+                const elementRect = cardElement.getBoundingClientRect();
+                const absoluteElementTop = elementRect.top + window.pageYOffset;
+                const targetScrollPosition = absoluteElementTop - 16; // 16px from top
+                
+                window.scrollTo({
+                    top: targetScrollPosition,
+                    behavior: 'smooth'
+                });
+                
+                // Then expand after scroll animation
+                setTimeout(() => {
+                    onToggle(id);
+                }, 300); // Wait for scroll to complete
+            } else {
+                // Fallback if element not found
+                onToggle(id);
+            }
+        }
+    };
+
+    // Handle chevron click - first align, then toggle expansion
+    const handleChevronClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+        
+        // If expanding, scroll first then expand
+        if (!isExpanded) {
+            const cardElement = document.querySelector(`[data-pack-id="${id}"]`);
+            if (cardElement) {
+                const elementRect = cardElement.getBoundingClientRect();
+                const absoluteElementTop = elementRect.top + window.pageYOffset;
+                const targetScrollPosition = absoluteElementTop - 16; // 16px from top
+                
+                window.scrollTo({
+                    top: targetScrollPosition,
+                    behavior: 'smooth'
+                });
+                
+                // Then expand after scroll animation
+                setTimeout(() => {
+                    onToggle(id);
+                }, 300); // Wait for scroll to complete
+            } else {
+                // Fallback if element not found
+                onToggle(id);
+            }
+        } else {
+            // If collapsing, just toggle immediately
+            onToggle(id);
+        }
+    };
+
     return (
         <div
-            onClick={() => { onSelect(id); }}
+            className="relative cursor-pointer transition-all duration-300 ease-in-out"
+            onClick={handleCardClick}
+            data-pack-id={id}
             style={{
-                background: isSelected ? "rgba(2,28,48,0.95)" : "transparent",
-                border: isSelected
-                    ? "1px solid #7FC241"
-                    : "1px solid rgba(255,255,255,0.1)", // Lighter border for unselected cards
-                borderRadius: 12,
-                padding: "24px",
-                cursor: "pointer",
-                transition: "all 0.3s ease",
-                boxShadow: isSelected
-                    ? "0 0 0 1px #7FC241, 0 4px 20px rgba(0,0,0,0.4)"
-                    : "none",
-                position: "relative",
-                overflow: "hidden"
+                border: '1px solid transparent',
+                borderRadius: '12px',
+                background: tierStyle.background,
+                boxShadow: tierStyle.shadow,
+                padding: '20px',
+                overflow: 'hidden',
+                transform: isSelected ? 'translateY(-2px)' : 'translateY(0px)',
             }}
         >
-            
-            {/* header row */}
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <RadioDot selected={isSelected} />
-                    <span className="text-xl sm:text-[22px] font-extrabold text-white font-sans leading-tight whitespace-nowrap overflow-hidden text-ellipsis tracking-tight">{title}</span>
+            {/* Header Row: Radio + Title + Collapse Button */}
+            <div className="flex items-center justify-between mb-2 gap-3">
+                <div className="flex items-center gap-3">
+                    <RadioDot selected={isSelected} tier={id} />
+                    <span className="text-lg sm:text-xl font-bold text-white font-sans leading-tight">
+                        {title}
+                    </span>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <Badge label={badge} />
-                    <div
-                        onClick={(e) => { e.stopPropagation(); onToggle(id); }}
-                        style={{ padding: 4, cursor: "pointer", borderRadius: 6, transition: "background 0.15s", display: "flex", alignItems: "center" }}
-                        onMouseEnter={e => e.currentTarget.style.background = "rgba(255,255,255,0.05)"}
-                        onMouseLeave={e => e.currentTarget.style.background = "transparent"}
-                    >
-                        <ChevronIcon open={isExpanded} />
+                <div
+                    onClick={handleChevronClick}
+                    className="p-2 hover:bg-white/10 rounded-md transition-colors cursor-pointer flex-shrink-0"
+                >
+                    <ChevronIcon open={isExpanded} />
+                </div>
+            </div>
+
+            {/* Badge Row - Completely left aligned */}
+            <div className="mb-3">
+                <Badge label={badge} />
+            </div>
+
+            {/* Pack Description with Progressive Indicator */}
+            <div className="mb-4">
+                {packData.isProgressive && packData.basePackage ? (
+                    <div className="flex items-center gap-2 text-sm">
+                        <span className="text-gray-400">Everything from</span>
+                        <span className="text-white font-medium">{packData.basePackage} Pack</span>
+                        <span className="text-gray-400">+</span>
+                    </div>
+                ) : (
+                    <p className="text-gray-300 text-sm font-medium">
+                        {getPackDescription(id)}
+                    </p>
+                )}
+            </div>
+
+            {/* Feature Pills - Show different amounts based on package tier */}
+            <div className="flex flex-wrap gap-2 mb-4">
+                {(() => {
+                    // Show different number of features based on package value
+                    let maxFeatures;
+                    switch (id) {
+                        case 'essential':
+                            maxFeatures = 4; // Show all for Essential (base package)
+                            break;
+                        case 'professional':
+                            maxFeatures = features.length; // Show all new additions
+                            break;
+                        case 'executive':
+                            maxFeatures = features.length; // Show all new additions  
+                            break;
+                        case 'ai-ready':
+                            maxFeatures = features.length; // Show all new additions
+                            break;
+                        default:
+                            maxFeatures = 4;
+                    }
+                    
+                    const visibleFeatures = features.slice(0, maxFeatures);
+                    const hiddenCount = features.length - maxFeatures;
+                    
+                    return (
+                        <>
+                            {visibleFeatures.map((f: any, i: number) => (
+                                <div key={i} className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${
+                                    id === 'ai-ready' 
+                                        ? 'bg-white/15 border border-white/30 text-white' 
+                                        : 'bg-white/10 border border-white/20 text-gray-200'
+                                }`}>
+                                    {packData.isProgressive ? (
+                                        <Plus size={12} className="text-white flex-shrink-0" strokeWidth={2.5} />
+                                    ) : null}
+                                    <div className="flex-shrink-0 w-4 h-4">
+                                        {f.icon}
+                                    </div>
+                                    <span className="whitespace-nowrap">{f.label}</span>
+                                </div>
+                            ))}
+                            {hiddenCount > 0 && (
+                                <div className="flex items-center px-3 py-1.5 bg-white/10 border border-white/20 rounded-full text-xs font-medium text-gray-200">
+                                    +{hiddenCount} more
+                                </div>
+                            )}
+                        </>
+                    );
+                })()}
+            </div>
+
+            {/* Divider Line */}
+            <div className="border-t border-white/20 my-4"></div>
+
+            {/* Pricing */}
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex items-baseline gap-2">
+                    <span className="text-red-400 line-through text-sm font-medium">
+                        ₹{original.toLocaleString("en-IN")}
+                    </span>
+                    <span className="text-2xl sm:text-3xl font-black text-white">
+                        ₹{current.toLocaleString("en-IN")}
+                    </span>
+                </div>
+                <div className="text-right">
+                    <div className="text-xs text-gray-300">You save</div>
+                    <div className="text-green-400 font-bold text-sm">
+                        ₹{(original - current).toLocaleString("en-IN")}
                     </div>
                 </div>
             </div>
 
-            {/* feature pills */}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "8px" }}>
-                {features.map((f: any, i: number) => <FeaturePill key={i} icon={f.icon} label={f.label} />)}
-            </div>
+            {/* Purchase Button */}
+            <button
+                onClick={(e) => { e.stopPropagation(); handleBuy(); }}
+                disabled={isLoading}
+                className={`w-full py-3 px-4 rounded-lg font-bold text-sm transition-all duration-200 ${
+                    isLoading 
+                        ? 'bg-gray-600 cursor-not-allowed text-gray-300' 
+                        : 'bg-[#7FC241] hover:bg-[#8cd34a] text-black shadow-lg hover:shadow-xl transform hover:-translate-y-0.5'
+                }`}
+            >
+                {isLoading ? 'Processing...' : `Get ${title}`}
+            </button>
 
-            {/* expandable section */}
-            <div style={{
-                overflow: "hidden",
-                maxHeight: isExpanded ? "2000px" : "0px",
-                opacity: isExpanded ? 1 : 0,
-                transition: "max-height 0.45s ease, opacity 0.3s ease",
-            }}>
-                <div style={{ borderTop: "1px solid rgba(255,255,255,0.05)", marginTop: 16, paddingTop: 8 }}>
+            {/* Expandable Section - Detailed Content */}
+            <div 
+                className="overflow-hidden transition-all duration-500 ease-in-out"
+                style={{
+                    maxHeight: isExpanded ? "2000px" : "0px",
+                    opacity: isExpanded ? 1 : 0,
+                }}
+            >
+                <div className="border-t border-white/20 mt-6 pt-6">
                     {certs?.length > 0 && (
-                        <>
+                        <div className="mb-6">
                             <SectionLabel>Certificates you get:</SectionLabel>
-                            {certs.map((c: any, i: number) => <CertRow key={i} {...c} />)}
-                        </>
+                            <div className="space-y-3">
+                                {certs.map((c: any, i: number) => <CertRow key={i} {...c} />)}
+                            </div>
+                        </div>
                     )}
                     {courses?.length > 0 && (
-                        <>
+                        <div className="mb-6">
                             <SectionLabel>Courses you get:</SectionLabel>
-                            {courses.map((c: any, i: number) => <CourseRow key={i} {...c} />)}
-                        </>
+                            <div className="space-y-3">
+                                {courses.map((c: any, i: number) => <CourseRow key={i} {...c} />)}
+                            </div>
+                        </div>
                     )}
-                    {freeItems?.length > 0 && <FreeBox items={freeItems} />}
+                    {freeItems?.length > 0 && (
+                        <div className="mb-4">
+                            <FreeBox items={freeItems} />
+                        </div>
+                    )}
                 </div>
             </div>
-
-            {/* divider + price always visible */}
-            <div style={{ borderTop: "1px solid rgba(255,255,255,0.1)", marginTop: 20 }} />
-            <PriceRow original={original} current={current} title={title} onBuy={handleBuy} isLoading={isLoading && isSelected} />
         </div>
     );
 }
@@ -432,7 +674,7 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
     const [touchStart, setTouchStart] = useState<number | null>(null);
     const [touchEnd, setTouchEnd] = useState<number | null>(null);
     // 🎯 V4 CRO: Simplified tier selection instead of individual certificates
-    const [selectedTier, setSelectedTier] = useState<'essential' | 'professional' | 'executive'>('professional'); // Default to recommended
+    const [selectedTier, setSelectedTier] = useState<'essential' | 'professional' | 'executive' | 'ai-ready'>('professional'); // Default to recommended
 
     // Min distance for swipe
     const minSwipeDistance = 50;
@@ -472,7 +714,7 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
     }];
 
     // Get certificates for each tier based on type filtering
-    const getTierCertificates = (tier: 'essential' | 'professional' | 'executive'): CertificationItem[] => {
+    const getTierCertificates = (tier: 'essential' | 'professional' | 'executive' | 'ai-ready'): CertificationItem[] => {
         try {
             console.log('Getting certificates for tier:', tier);
             console.log('Available certifications:', certifications);
@@ -513,7 +755,7 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
         }
     };
 
-    const [expandedTier, setExpandedTier] = useState<string | null>('professional');
+    const [expandedTier, setExpandedTier] = useState<string | null>(null);
     
     // Ensure the default selected tier is also 'professional' if not already set by props/logic
     useEffect(() => {
@@ -522,12 +764,12 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
         }
     }, [selectedTier, setSelectedTier]);
 
-    // Auto-expand when a card is selected
-    useEffect(() => {
-        if (selectedTier) {
-            setExpandedTier(selectedTier);
-        }
-    }, [selectedTier]);
+    // Auto-expand when a card is selected - DISABLED for collapsed by default behavior
+    // useEffect(() => {
+    //     if (selectedTier) {
+    //         setExpandedTier(selectedTier);
+    //     }
+    // }, [selectedTier]);
 
     const handleToggle = (id: string) => setExpandedTier(prev => prev === id ? null : id);
 
@@ -541,6 +783,8 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
                     return { price: 2, original: 6, certificates: 3, bonuses: 2 };
                 case 'executive':
                     return { price: 3, original: 9, certificates: 5, bonuses: 4 };
+                case 'ai-ready':
+                    return { price: 1, original: 2, certificates: 1, bonuses: 1 };
                 default:
                     return { price: 2, original: 6, certificates: 3, bonuses: 2 };
             }
@@ -549,11 +793,13 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
         // 💰 PRODUCTION PRICING: Normal pricing
         switch (id) {
             case 'essential':
-                return { price: 2999, original: 8999, certificates: 2, bonuses: 1 };
+                return { price: 1999, original: 5999, certificates: 2, bonuses: 1 };
             case 'professional':
-                return { price: 4999, original: 18999, certificates: 3, bonuses: 2 };
+                return { price: 4999, original: 18999, certificates: 4, bonuses: 2 };
             case 'executive':
                 return { price: 6999, original: 28999, certificates: 5, bonuses: 4 };
+            case 'ai-ready':
+                return { price: 2999, original: 8999, certificates: 3, bonuses: 1 };
             default:
                 return { price: 4999, original: 18999, certificates: 3, bonuses: 2 };
         }
@@ -563,11 +809,12 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
         {
             id: "essential",
             title: "Core Certifications",
-            badge: "GOOD START",
+            badge: "CORE",
             features: [
-                { icon: <CheckIcon />, label: "Verified Certificates" },
+                { icon: <CheckIcon />, label: "2 Verified Certificates" },
+                { icon: <CourseIcon />, label: "1 Personalised Course" },
                 { icon: <LinkedInIcon />, label: "LinkedIn Ready" },
-                { icon: <CheckIcon />, label: "Trusted by Recruiters" },
+                { icon: <TrustedIcon />, label: "Trusted by Recruiters" },
             ],
             certs: getTierCertificates('essential').map(cert => ({
                 title: cert.certification_name,
@@ -580,16 +827,37 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
             freeItems: [],
             original: getTierPricingById('essential').original,
             current: getTierPricingById('essential').price,
+            isProgressive: false,
+            basePackage: null,
+        },
+        {
+            id: "ai-ready",
+            title: "AI Specialist",
+            badge: "AI READY",
+            features: [
+                { icon: <AIIcon />, label: "1 AI Certification" },
+                { icon: <CourseIcon />, label: "1 AI Course" },
+            ],
+            certs: getTierCertificates('ai-ready').map(cert => ({
+                title: cert.certification_name,
+                subtitle: (cert.type === 'default' || cert.type === 'primary' || !cert.type) ? 'Core Certification' : cert.type === 'ai' ? 'AI Certification' : 'Secondary Certification',
+                certItem: cert
+            })),
+            courses: [
+                { title: `AI for ${role || 'Project Managers'}`, subtitle: `Specialized AI training for ${role || 'professionals'}` },
+            ],
+            freeItems: [],
+            original: getTierPricingById('ai-ready').original,
+            current: getTierPricingById('ai-ready').price,
+            isProgressive: true,
+            basePackage: "Core",
         },
         {
             id: "professional",
             title: "Professional Pack",
-            badge: "MOST POPULAR",
+            badge: "RECOMMENDED",
             features: [
-                { icon: <CheckIcon />, label: "Verified Certificates" },
-                { icon: <LinkedInIcon />, label: "LinkedIn Ready" },
-                { icon: <CheckIcon />, label: "Trusted by Recruiters" },
-                { icon: <CourseIcon />, label: "Personalised Course" },
+                { icon: <CheckIcon />, label: "2 Secondary Certificates" },
                 { icon: <ResumeIcon />, label: "Free Resume Enhancer" },
             ],
             certs: getTierCertificates('professional').map(cert => ({
@@ -605,19 +873,19 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
             ],
             original: getTierPricingById('professional').original,
             current: getTierPricingById('professional').price,
+            isProgressive: true,
+            basePackage: "Core",
         },
         {
             id: "executive",
             title: "Ultimate Pack",
-            badge: "AI READY",
+            badge: "ALL IN ONE",
             features: [
-                { icon: <CheckIcon />, label: "Verified Certificate" },
-                { icon: <LinkedInIcon />, label: "LinkedIn Ready" },
-                { icon: <CheckIcon />, label: "Trusted by Recruiters" },
-                { icon: <CourseIcon />, label: "Personalised Course" },
-                { icon: <ResumeIcon />, label: "Free Resume Enhancer" },
+                { icon: <CheckIcon />, label: "2 Secondary Certificates" },
+                { icon: <AIIcon />, label: "1 AI Certification" },
+                { icon: <CourseIcon />, label: "1 AI Course" },
                 { icon: <ProPlanIcon />, label: "1 Month LearnTube Pro" },
-                { icon: <CourseIcon />, label: "AI for Project Managers Course" },
+                { icon: <ResumeIcon />, label: "Free Resume Enhancer" },
             ],
             certs: getTierCertificates('executive').map(cert => ({
                 title: cert.certification_name,
@@ -634,6 +902,8 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
             ],
             original: getTierPricingById('executive').original,
             current: getTierPricingById('executive').price,
+            isProgressive: true,
+            basePackage: "Professional",
         },
     ];
 
@@ -641,10 +911,10 @@ const BundleSectionV4: React.FC<BundleSectionProps> = ({
         <>
             <section id="claim-certificates-section" className={`w-full ${className}`}>
 
-                {/* Section Title - Enhanced with Personalized Course */}
+                {/* Section Title - Enhanced with Pack Selection */}
                 <div className="text-center mb-6">
                     <h2 className="text-2xl font-bold text-white mb-2">
-                        Get Your <span className="text-[#7FC241]">Global {role || 'Professional'}</span> Certificates
+                        Choose Your Pack and Get Your <span className="text-[#7FC241]">Global {role || 'Professional'}</span> Certificates
                     </h2>
                 </div>
 

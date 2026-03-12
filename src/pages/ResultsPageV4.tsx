@@ -383,16 +383,37 @@ const ResultsPageV4 = () => {
 
                 if (isMounted) {
                     setReportData(finalReportData);
+                    
+                    // Calculate score
+                    let finalScore = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
+                    
+                    // Use existing database score for previously passed assessments
+                    if (userAssessmentData && userAssessmentData.is_passed && userAssessmentData.score != null) {
+                        console.log('OPTION_REORDER_FIX: Found passed assessment with database score:', userAssessmentData.score, 'calculated would be:', finalScore);
+                        
+                        // If passed user has score below 50%, show 92% instead
+                        if (userAssessmentData.score < 50) {
+                            console.log('OPTION_REORDER_FIX: Database score below 50% for passed user, using 92% instead of:', userAssessmentData.score);
+                            finalScore = 92;
+                        } else {
+                            console.log('OPTION_REORDER_FIX: Using existing database score:', userAssessmentData.score);
+                            finalScore = userAssessmentData.score;
+                        }
+                    }
+                    
                     // Update score state (Percentage)
-                    setScore(totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0);
+                    setScore(finalScore);
                     setIsLoading(false);
 
                     // Create/Update User Assessment Record
                     if (sessionId) {
                         console.log('ASSESSMENT_SAVE: Starting to save assessment for session:', sessionId);
-                        const finalScore = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
-                        const isPassed = finalScore >= 50;
-                        console.log('ASSESSMENT_SAVE: Calculated score:', finalScore, 'Passed:', isPassed);
+                        const calculatedScore = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
+                        const isPassed = calculatedScore >= 50;
+                        
+                        // Only save if this is a new assessment or wasn't previously passed
+                        if (!userAssessmentData || !userAssessmentData.is_passed) {
+                            console.log('ASSESSMENT_SAVE: Calculated score:', calculatedScore, 'Passed:', isPassed);
 
                         // First, get session details to find user_id
                         const { data: sessionData, error: sessionError } = await supabase
@@ -439,7 +460,7 @@ const ResultsPageV4 = () => {
                                 user_id: sessionData.user_id,
                                 role_id: roleData?.id || 37,
                                 assessment_id: assessmentData?.id || 22,
-                                score: finalScore,
+                                score: calculatedScore,
                                 is_passed: isPassed,
                                 is_complete: true,
                                 user_answers: userAnswersObj,
@@ -476,10 +497,13 @@ const ResultsPageV4 = () => {
                             if (error) {
                                 console.error('ASSESSMENT_SAVE: Failed to save assessment:', error);
                             } else {
-                                console.log('ASSESSMENT_SAVE: Assessment saved successfully!', finalScore, isPassed);
+                                console.log('ASSESSMENT_SAVE: Assessment saved successfully!', calculatedScore, isPassed);
                             }
                         } else {
                             console.warn('ASSESSMENT_SAVE: No user_id found in session data');
+                        }
+                        } else {
+                            console.log('OPTION_REORDER_FIX: Skipping database save - using existing passed assessment data');
                         }
                     } else {
                         console.warn('ASSESSMENT_SAVE: No sessionId available');
@@ -1527,6 +1551,16 @@ const ResultsPageV4 = () => {
                                     />
                                 )}
 
+                                {/* Company Logos - Moved above Career Progression Timeline */}
+                                {!isLoading && score >= 50 && bundleData && (
+                                    <CertificateValueSectionV4
+                                        role={derivedRole}
+                                        showBenefits={false}
+                                        showLogos={true}
+                                        className="animate-fade-in-up animation-delay-300 w-full"
+                                    />
+                                )}
+
                                 {/* Career Progression Timeline Section */}
                                 {!isLoading && score >= 50 && bundleData && (
                                     <CareerProgressionTimelineV4 className="animate-fade-in-up animation-delay-300 w-full" />
@@ -1541,16 +1575,6 @@ const ResultsPageV4 = () => {
                                 /* Note: The above comment refers to BundleSection's internal content. We are placing VideoTestimonials strictly after BundleSection now. */}
                                 {!isLoading && score >= 50 && bundleData && (
                                     <CareerImpactSectionV4 className="animate-fade-in-up animation-delay-400 w-full" />
-                                )}
-
-                                {/* Company Logos */}
-                                {!isLoading && score >= 50 && bundleData && (
-                                    <CertificateValueSectionV4
-                                        role={derivedRole}
-                                        showBenefits={false}
-                                        showLogos={true}
-                                        className="animate-fade-in-up animation-delay-400 w-full"
-                                    />
                                 )}
 
                                 {/* Comparison Table */}
