@@ -411,9 +411,8 @@ const ResultsPageV4 = () => {
                         const calculatedScore = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
                         const isPassed = calculatedScore >= 50;
                         
-                        // Only save if this is a new assessment or wasn't previously passed
-                        if (!userAssessmentData || !userAssessmentData.is_passed) {
-                            console.log('ASSESSMENT_SAVE: Calculated score:', calculatedScore, 'Passed:', isPassed);
+                        // Always save assessment data (like V3 does)
+                        console.log('ASSESSMENT_SAVE: Calculated score:', calculatedScore, 'Passed:', isPassed);
 
                         // First, get session details to find user_id
                         const { data: sessionData, error: sessionError } = await supabase
@@ -501,9 +500,6 @@ const ResultsPageV4 = () => {
                             }
                         } else {
                             console.warn('ASSESSMENT_SAVE: No user_id found in session data');
-                        }
-                        } else {
-                            console.log('OPTION_REORDER_FIX: Skipping database save - using existing passed assessment data');
                         }
                     } else {
                         console.warn('ASSESSMENT_SAVE: No sessionId available');

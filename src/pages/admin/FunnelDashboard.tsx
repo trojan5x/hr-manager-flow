@@ -23,6 +23,12 @@ const FunnelDashboard = () => {
         successfulPayments: 0
     });
 
+    // Sidebar State
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [sidebarData, setSidebarData] = useState<any>(null);
+    const [sidebarTitle, setSidebarTitle] = useState('');
+    const [sidebarLoading, setSidebarLoading] = useState(false);
+
     // Filter State
     const [filters, setFilters] = useState({
         utmSource: '',
@@ -196,6 +202,201 @@ const FunnelDashboard = () => {
         setDateFilter({});
     };
 
+    // Fetch detailed data for sidebar
+    const fetchSidebarData = async (type: string) => {
+        setSidebarLoading(true);
+        try {
+            console.log('🔍 SIDEBAR DEBUG: fetchSidebarData called with type:', type);
+            console.log('🔍 SIDEBAR DEBUG: Current dateFilter:', dateFilter);
+            console.log('🔍 SIDEBAR DEBUG: Current filters:', filters);
+            
+            let query;
+            let title = '';
+
+            // First, get the matching session IDs (same logic as main dashboard)
+            let sessionQuery = supabase.from('sessions').select('id, created_at', { count: 'exact' });
+
+            if (filters.utmSource) {
+                sessionQuery = sessionQuery.ilike('utm_source', `%${filters.utmSource}%`);
+            }
+            if (filters.utmMedium) {
+                sessionQuery = sessionQuery.ilike('utm_medium', `%${filters.utmMedium}%`);
+            }
+            if (filters.role) {
+                sessionQuery = sessionQuery.eq('role', filters.role);
+            }
+            
+            // Apply date filters
+            if (dateFilter.startDate) {
+                sessionQuery = sessionQuery.gte('created_at', dateFilter.startDate);
+            }
+            if (dateFilter.endDate) {
+                sessionQuery = sessionQuery.lte('created_at', dateFilter.endDate);
+            }
+
+            const { data: sessionData, error: sessionError } = await sessionQuery.limit(10000);
+            
+            if (sessionError) throw sessionError;
+
+            // Extract matching Session IDs
+            const matchingSessionIds = sessionData?.map(s => s.id.toString()) || [];
+            
+            console.log('🔍 SIDEBAR DEBUG: Found sessions matching filters:', sessionData?.length);
+            console.log('🔍 SIDEBAR DEBUG: matchingSessionIds:', matchingSessionIds.slice(0, 10), '... (showing first 10)');
+            
+            if (matchingSessionIds.length === 0) {
+                setSidebarData([]);
+                setSidebarTitle(title);
+                setSidebarOpen(true);
+                return;
+            }
+
+            switch (type) {
+                case 'revenue':
+                    title = 'Revenue Details';
+                    query = supabase
+                        .from('orders')
+                        .select(`
+                            id, amount, currency, created_at, status, razorpay_payment_id,
+                            users!inner(id, name, email, phone_number)
+                        `)
+                        .eq('status', 'paid')
+                        .in('session_id', matchingSessionIds.map(id => parseInt(id, 10)))
+                        .order('created_at', { ascending: false });
+                    break;
+
+                case 'payments':
+                    title = 'Successful Payments';
+                    query = supabase
+                        .from('orders')
+                        .select(`
+                            id, amount, currency, created_at, status, razorpay_payment_id,
+                            users!inner(id, name, email, phone_number)
+                        `)
+                        .eq('status', 'paid')
+                        .in('session_id', matchingSessionIds.map(id => parseInt(id, 10)))
+                        .order('created_at', { ascending: false });
+                    break;
+
+                case 'completed':
+                    title = 'Completed Assessments';
+                    // Query tracking_events for 'assessment_completed' events (same as main dashboard)
+                    query = supabase
+                        .from('tracking_events')
+                        .select(`
+                            id, created_at, session_id,
+                            sessions!inner(id, created_at, utm_source, utm_medium, role,
+                                users(id, name, email, phone_number)
+                            )
+                        `)
+                        .eq('event_name', 'assessment_completed')
+                        .in('session_id', matchingSessionIds)
+                        .order('created_at', { ascending: false })
+                        .limit(200);
+                    break;
+
+                case 'passed':
+                    title = 'Passed Assessments';
+                    // For passed, we need to check user_assessments with is_passed = true
+                    query = supabase
+                        .from('user_assessments')
+                        .select(`
+                            id, score, created_at, is_complete, is_passed, time_taken,
+                            users!inner(id, name, email, phone_number),
+                            roles!inner(id, role_name)
+                        `)
+                        .eq('is_passed', true)
+                        .in('session_id', matchingSessionIds.map(id => parseInt(id, 10)))
+                        .order('created_at', { ascending: false })
+                        .limit(200);
+                    break;
+
+                case 'assessments':
+                    title = 'All Assessment Details';
+                    query = supabase
+                        .from('user_assessments')
+                        .select(`
+                            id, score, created_at, is_complete, is_passed, time_taken,
+                            users!inner(id, name, email, phone_number),
+                            roles!inner(id, role_name)
+                        `)
+                        .in('session_id', matchingSessionIds.map(id => parseInt(id, 10)))
+                        .order('created_at', { ascending: false })
+                        .limit(100);
+                    break;
+
+                case 'clicked_begin':
+                    title = 'Users Who Clicked Begin';
+                    // Get tracking events for 'begin' that match our session IDs
+                    query = supabase
+                        .from('tracking_events')
+                        .select(`
+                            id, created_at, session_id,
+                            sessions!inner(id, created_at, utm_source, utm_medium, role,
+                                users(id, name, email, phone_number)
+                            )
+                        `)
+                        .eq('event_name', 'click_begin_assessment')
+                        .in('session_id', matchingSessionIds)
+                        .order('created_at', { ascending: false })
+                        .limit(100);
+                    break;
+
+                case 'payment_init':
+                    title = 'Users Who Initiated Payment';
+                    // Get tracking events for 'payment_initiated' that match our session IDs
+                    query = supabase
+                        .from('tracking_events')
+                        .select(`
+                            id, created_at, session_id,
+                            sessions!inner(id, created_at, utm_source, utm_medium, role,
+                                users(id, name, email, phone_number)
+                            )
+                        `)
+                        .eq('event_name', 'payment_initiated')
+                        .in('session_id', matchingSessionIds)
+                        .order('created_at', { ascending: false })
+                        .limit(100);
+                    break;
+
+                case 'sessions':
+                    title = 'Session Details';
+                    // Show ALL sessions (no limit) - use left join to include sessions without users
+                    query = supabase
+                        .from('sessions')
+                        .select(`
+                            id, created_at, utm_source, utm_medium, utm_campaign, role, ip_address,
+                            users(id, name, email, phone_number)
+                        `)
+                        .in('id', matchingSessionIds.map(id => parseInt(id, 10)))
+                        .order('created_at', { ascending: false });
+                        // No limit - show all matching sessions
+                    break;
+
+                default:
+                    return;
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+                console.error('Error fetching sidebar data:', error);
+                return;
+            }
+
+            console.log('🔍 SIDEBAR DEBUG: Final query result count:', data?.length);
+            console.log('🔍 SIDEBAR DEBUG: Sample data:', data?.slice(0, 2));
+
+            setSidebarData(data);
+            setSidebarTitle(title);
+            setSidebarOpen(true);
+        } catch (error) {
+            console.error('Exception fetching sidebar data:', error);
+        } finally {
+            setSidebarLoading(false);
+        }
+    };
+
     const setCommonDateFilter = (days: number) => {
         const now = new Date();
         const startDate = new Date();
@@ -254,7 +455,8 @@ const FunnelDashboard = () => {
                 sessionQuery = sessionQuery.lte('created_at', dateFilter.endDate);
             }
 
-            const { data: sessionData, count: sessionCount, error: sessionError } = await sessionQuery;
+            // Get ALL sessions (no limit) to ensure we capture all paid orders
+            const { data: sessionData, count: sessionCount, error: sessionError } = await sessionQuery.limit(10000);
 
             if (sessionError) throw sessionError;
 
@@ -966,7 +1168,29 @@ const FunnelDashboard = () => {
                                         : null;
 
                                     return (
-                                        <div key={i} className={`bg-[#0B2A3D] rounded-xl p-4 border ${stat.highlight ? 'border-[#98D048]/50 bg-[#98D048]/10' : 'border-gray-700'}`}>
+                                        <div 
+                                            key={i} 
+                                            className={`bg-[#0B2A3D] rounded-xl p-4 border ${stat.highlight ? 'border-[#98D048]/50 bg-[#98D048]/10' : 'border-gray-700'} cursor-pointer hover:bg-white/5 transition-colors`}
+                                            onClick={() => {
+                                                if (stat.label === 'Paid Success') {
+                                                    fetchSidebarData('payments');
+                                                } else if (stat.label === 'Total Revenue') {
+                                                    fetchSidebarData('revenue');
+                                                } else if (stat.label === 'Total Sessions') {
+                                                    fetchSidebarData('sessions');
+                                                } else if (stat.label === 'Completed') {
+                                                    fetchSidebarData('completed');
+                                                } else if (stat.label === 'Passed') {
+                                                    fetchSidebarData('passed');
+                                                } else if (stat.label === 'Clicked Begin') {
+                                                    fetchSidebarData('clicked_begin');
+                                                } else if (stat.label === 'Payment Init') {
+                                                    fetchSidebarData('payment_init');
+                                                } else if (stat.label === 'Avg Order Value') {
+                                                    fetchSidebarData('revenue'); // Same as revenue for AOV
+                                                }
+                                            }}
+                                        >
                                             <div className="text-gray-400 text-xs uppercase font-semibold mb-1">{stat.label}</div>
                                             <div className={`text-2xl font-bold ${stat.highlight ? 'text-[#98D048]' : 'text-white'}`}>{stat.value}</div>
                                             <div className="flex flex-col mt-3 gap-2">
@@ -1069,6 +1293,290 @@ const FunnelDashboard = () => {
                     </div>
                 )}
             </div>
+
+            {/* Detail Sidebar */}
+            {sidebarOpen && (
+                <>
+                    {/* Backdrop */}
+                    <div 
+                        className="fixed inset-0 z-40 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setSidebarOpen(false)}
+                    />
+                    
+                    {/* Sidebar */}
+                    <div className="fixed right-0 top-0 z-50 w-full max-w-2xl bg-[#021019] border-l border-white/20 flex flex-col h-full">
+                        {/* Header */}
+                        <div className="p-6 border-b border-white/20 flex items-center justify-between">
+                            <h2 className="text-xl font-bold text-white">{sidebarTitle}</h2>
+                            <button
+                                onClick={() => setSidebarOpen(false)}
+                                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                            >
+                                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto p-6">
+                            {sidebarLoading ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#98D048]"></div>
+                                </div>
+                            ) : sidebarData && sidebarData.length > 0 ? (
+                                <div className="space-y-4">
+                                    {sidebarData.map((item: any, index: number) => (
+                                        <div key={index} className="bg-white/5 border border-white/10 rounded-lg p-4 relative">
+                                            {/* Serial Number Badge */}
+                                            <div className="absolute -top-2 -left-2 w-6 h-6 bg-[#98D048] text-[#021019] rounded-full flex items-center justify-center text-xs font-bold">
+                                                {index + 1}
+                                            </div>
+                                            {/* Revenue/Payments Data */}
+                                            {(sidebarTitle.includes('Revenue') || sidebarTitle.includes('Payment')) && (
+                                                <>
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-full bg-[#98D048]/20 flex items-center justify-center">
+                                                                <svg className="w-5 h-5 text-[#98D048]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-semibold text-white">{item.users?.name || 'Unknown'}</h3>
+                                                                <p className="text-sm text-gray-400">{item.users?.email}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-lg font-bold text-[#98D048]">₹{Number(item.amount).toLocaleString('en-IN')}</p>
+                                                            <p className="text-xs text-gray-500">{item.currency}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                                        <div>
+                                                            <span className="text-gray-400">Phone:</span>
+                                                            <p className="text-white font-mono">{item.users?.phone_number || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Date:</span>
+                                                            <p className="text-white">{new Date(item.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Payment ID:</span>
+                                                            <p className="text-white font-mono text-xs">{item.razorpay_payment_id || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Status:</span>
+                                                            <span className="inline-block px-2 py-1 bg-green-500/20 text-green-400 rounded text-xs font-medium">
+                                                                {item.status}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* Assessment Data */}
+                                            {(sidebarTitle.includes('Assessment') || sidebarTitle.includes('Passed')) && (
+                                                <>
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
+                                                                <svg className="w-5 h-5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-semibold text-white">{item.users?.name || 'Unknown'}</h3>
+                                                                <p className="text-sm text-gray-400">{item.users?.email}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-lg font-bold text-orange-400">{item.score}%</p>
+                                                            <p className="text-xs text-gray-500">{item.is_passed ? 'Passed' : 'Failed'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                                        <div>
+                                                            <span className="text-gray-400">Role:</span>
+                                                            <p className="text-white">{item.roles?.role_name || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Time Taken:</span>
+                                                            <p className="text-white">{item.time_taken || 0} mins</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Date:</span>
+                                                            <p className="text-white">{new Date(item.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Complete:</span>
+                                                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                                                                item.is_complete 
+                                                                    ? 'bg-green-500/20 text-green-400' 
+                                                                    : 'bg-yellow-500/20 text-yellow-400'
+                                                            }`}>
+                                                                {item.is_complete ? 'Yes' : 'No'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* Completed Assessments from Tracking Events */}
+                                            {sidebarTitle.includes('Completed') && item.sessions && (
+                                                <>
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                                                                <svg className="w-5 h-5 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-semibold text-white">{item.sessions.users?.name || 'Anonymous'}</h3>
+                                                                <p className="text-sm text-gray-400">{item.sessions.users?.email || 'No email'}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-sm font-bold text-green-400">Session #{item.sessions.id}</p>
+                                                            <p className="text-xs text-gray-500">{item.sessions.role || 'No role'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                                        <div>
+                                                            <span className="text-gray-400">UTM Source:</span>
+                                                            <p className="text-white">{item.sessions.utm_source || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">UTM Medium:</span>
+                                                            <p className="text-white">{item.sessions.utm_medium || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Completed Date:</span>
+                                                            <p className="text-white">{new Date(item.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Session Date:</span>
+                                                            <p className="text-white">{new Date(item.sessions.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* Session Data */}
+                                            {sidebarTitle.includes('Session') && (
+                                                <>
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-full bg-blue-500/20 flex items-center justify-center">
+                                                                <svg className="w-5 h-5 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-semibold text-white">{item.users?.name || 'Anonymous'}</h3>
+                                                                <p className="text-sm text-gray-400">{item.users?.email || 'No email'}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-sm font-bold text-blue-400">Session #{item.id}</p>
+                                                            <p className="text-xs text-gray-500">{item.role || 'No role'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                                        <div>
+                                                            <span className="text-gray-400">UTM Source:</span>
+                                                            <p className="text-white">{item.utm_source || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">UTM Medium:</span>
+                                                            <p className="text-white">{item.utm_medium || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Date:</span>
+                                                            <p className="text-white">{new Date(item.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">IP Address:</span>
+                                                            <p className="text-white font-mono text-xs">{item.ip_address || 'N/A'}</p>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* Tracking Event Data (Begin/Payment Init) */}
+                                            {(sidebarTitle.includes('Clicked Begin') || sidebarTitle.includes('Payment')) && item.sessions && (
+                                                <>
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                                                                sidebarTitle.includes('Payment') 
+                                                                    ? 'bg-green-500/20' 
+                                                                    : 'bg-purple-500/20'
+                                                            }`}>
+                                                                <svg className={`w-5 h-5 ${
+                                                                    sidebarTitle.includes('Payment') 
+                                                                        ? 'text-green-400' 
+                                                                        : 'text-purple-400'
+                                                                }`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    {sidebarTitle.includes('Payment') ? (
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1" />
+                                                                    ) : (
+                                                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M14.828 14.828a4 4 0 01-5.656 0M9 10h1.586a1 1 0 01.707.293L12 11l.707-.707A1 1 0 0113.414 10H15M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                                                                    )}
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-semibold text-white">{item.sessions.users?.name || 'Anonymous'}</h3>
+                                                                <p className="text-sm text-gray-400">{item.sessions.users?.email || 'No email'}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className={`text-sm font-bold ${
+                                                                sidebarTitle.includes('Payment') 
+                                                                    ? 'text-green-400' 
+                                                                    : 'text-purple-400'
+                                                            }`}>
+                                                                Session #{item.sessions.id}
+                                                            </p>
+                                                            <p className="text-xs text-gray-500">{item.sessions.role || 'No role'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                                        <div>
+                                                            <span className="text-gray-400">UTM Source:</span>
+                                                            <p className="text-white">{item.sessions.utm_source || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">UTM Medium:</span>
+                                                            <p className="text-white">{item.sessions.utm_medium || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Event Date:</span>
+                                                            <p className="text-white">{new Date(item.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Session Date:</span>
+                                                            <p className="text-white">{new Date(item.sessions.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12">
+                                    <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 009.586 13H7" />
+                                    </svg>
+                                    <p className="text-gray-400">No data available</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </>
+            )}
         </div>
     );
 };

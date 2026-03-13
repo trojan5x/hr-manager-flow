@@ -18,6 +18,7 @@ import SimpleResultsPage from './pages/SimpleResultsPage';
 import ResultsPageV2 from './pages/ResultsPageV2';
 import ResultsPageV3 from './pages/ResultsPageV3';
 import ResultsPageV4 from './pages/ResultsPageV4';
+import ResultsPageV5 from './pages/ResultsPageV5';
 // import AssessmentPageVariant from './pages/AssessmentPageVariant';
 import AssessmentPage from './pages/AssessmentPage';
 import FunnelDashboard from './pages/admin/FunnelDashboard';
@@ -46,6 +47,7 @@ function App() {
       <Route path="/results-v2-page" element={<ResultsPageV2 />} />
       <Route path="/results-v3" element={<ResultsPageV3 />} />
       <Route path="/results-v4" element={<ResultsPageV4 />} />
+      <Route path="/results-v5" element={<ResultsPageV5 />} />
       <Route path="/assessment-variant" element={<AssessmentPage />} />
       <Route path="/role-variant" element={<RolePageVariant />} />
       <Route path="/admin/dashboard" element={<FunnelDashboard />} />
@@ -66,8 +68,8 @@ function ResultsRouter() {
     return <SimpleResultsPage />;
   }
 
-  // Default to ResultsPageV4 (with V3 as backup at /results-v3)
-  return <ResultsPageV4 />;
+  // Default to ResultsPageV5 (now fixed)
+  return <ResultsPageV5 />;
 }
 
 function HomeOrRole() {

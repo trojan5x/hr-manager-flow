@@ -1061,6 +1061,9 @@ export interface PaymentAnalytics {
  * Fetches all successful payments and calculates metrics with optional date filtering
  */
 export const getPaymentAnalytics = async (dateFilter?: DateFilter): Promise<PaymentAnalytics> => {
+    console.log('🔍 API DEBUG: getPaymentAnalytics called with dateFilter:', dateFilter);
+    console.log('🔍 API DEBUG: dateFilter stringified:', JSON.stringify(dateFilter));
+    
     try {
         // Base query for orders with payments
         let ordersQuery = supabase
@@ -1070,13 +1073,16 @@ export const getPaymentAnalytics = async (dateFilter?: DateFilter): Promise<Paym
 
         // Apply date filters if provided
         if (dateFilter?.startDate) {
+            console.log('🔍 API DEBUG: Applying startDate filter:', dateFilter.startDate);
             ordersQuery = ordersQuery.gte('created_at', dateFilter.startDate);
         }
         if (dateFilter?.endDate) {
+            console.log('🔍 API DEBUG: Applying endDate filter:', dateFilter.endDate);
             ordersQuery = ordersQuery.lte('created_at', dateFilter.endDate);
         }
 
         const { data: orders, error: ordersError } = await ordersQuery;
+        console.log('🔍 API DEBUG: Query result - orders count:', orders?.length);
 
         if (ordersError) {
             console.error('Error fetching payment analytics:', ordersError);
@@ -1566,6 +1572,8 @@ export const getUserAssessmentBySession = async (sessionId: number | string) => 
                 id,
                 session_id,
                 user_id,
+                role_id,
+                assessment_id,
                 score,
                 is_passed,
                 is_complete,
