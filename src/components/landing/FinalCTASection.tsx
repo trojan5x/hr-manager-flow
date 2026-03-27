@@ -25,7 +25,7 @@ const FinalCTASection = ({ onBeginAssessment, isLoading = false, role = "Profess
                 <div className="flex flex-col items-center">
                     <Button
                         variant="primary"
-                        className={`text-xl py-6 px-12 rounded-lg font-bold shadow-[0_0_40px_rgba(152,208,72,0.3)] animate-pulsate-glow hover:scale-105 transition-transform duration-300 ${isLoading ? 'opacity-75 cursor-wait' : ''}`}
+                        className={`text-sm min-[375px]:text-base md:text-xl py-4 min-[375px]:py-6 px-6 min-[375px]:px-8 md:px-12 rounded-lg font-bold shadow-[0_0_40px_rgba(152,208,72,0.3)] animate-pulsate-glow hover:scale-105 transition-transform duration-300 whitespace-nowrap ${isLoading ? 'opacity-75 cursor-wait' : ''}`}
                         onClick={onBeginAssessment}
                         disabled={isLoading}
                     >

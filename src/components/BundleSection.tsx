@@ -345,29 +345,55 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                                             </span>
                                                         )}
 
-                                                        {/* Original Price (Strikethrough) - Based on certificate type */}
-                                                        {(cert as any).type === 'default' ? (
-                                                            <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
-                                                                ₹4,999
-                                                            </span>
-                                                        ) : ((cert as any).type === 'secondary' || (cert as any).type === 'ai') ? (
-                                                            <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
-                                                                ₹1,999
-                                                            </span>
-                                                        ) : cert.original_price && (
-                                                            <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
-                                                                ₹{cert.original_price}
-                                                            </span>
-                                                        )}
-
-                                                        {/* Current Price - Based on certificate type */}
-                                                        <span className={`text-xs font-bold ${selectedIds.includes(cert.skill_id) ? 'text-white' : 'text-gray-300'}`}>
-                                                            ₹{
-                                                                (cert as any).type === 'default' ? 1999 :               // Default certificates - ₹1999
-                                                                    (cert as any).type === 'secondary' ? 999 :           // Secondary certificates - ₹999
-                                                                        (cert as any).type === 'ai' ? 999 :              // AI certificates - ₹999
-                                                                            cert.price || 999                   // Fallback price
+                                                        {/* Original Price (Strikethrough) - Based on certificate type and position */}
+                                                        {(() => {
+                                                            if ((cert as any).type === 'default') {
+                                                                // Check if this is first or second default certificate
+                                                                const defaultCerts = certifications
+                                                                    .filter((c: any) => c.type === 'default')
+                                                                    .sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+                                                                const isFirstDefault = defaultCerts[0]?.skill_id === cert.skill_id;
+                                                                
+                                                                return (
+                                                                    <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
+                                                                        {isFirstDefault ? '₹4,999' : '₹2,999'}
+                                                                    </span>
+                                                                );
+                                                            } else if ((cert as any).type === 'secondary' || (cert as any).type === 'ai') {
+                                                                return (
+                                                                    <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
+                                                                        ₹1,999
+                                                                    </span>
+                                                                );
+                                                            } else if (cert.original_price) {
+                                                                return (
+                                                                    <span className="text-[10px] text-gray-500 line-through decoration-red-500/60">
+                                                                        ₹{cert.original_price}
+                                                                    </span>
+                                                                );
                                                             }
+                                                            return null;
+                                                        })()}
+
+                                                        {/* Current Price - Based on certificate type and position */}
+                                                        <span className={`text-xs font-bold ${selectedIds.includes(cert.skill_id) ? 'text-white' : 'text-gray-300'}`}>
+                                                            ₹{(() => {
+                                                                if ((cert as any).type === 'default') {
+                                                                    // Check if this is first or second default certificate
+                                                                    const defaultCerts = certifications
+                                                                        .filter((c: any) => c.type === 'default')
+                                                                        .sort((a: any, b: any) => (a.order_index || 0) - (b.order_index || 0));
+                                                                    const isFirstDefault = defaultCerts[0]?.skill_id === cert.skill_id;
+                                                                    
+                                                                    return isFirstDefault ? 1999 : 1499;  // First: ₹1999, Second+: ₹1499
+                                                                } else if ((cert as any).type === 'secondary') {
+                                                                    return 999;  // Secondary certificates - ₹999
+                                                                } else if ((cert as any).type === 'ai') {
+                                                                    return 999;  // AI certificates - ₹999
+                                                                } else {
+                                                                    return cert.price || 999;  // Fallback price
+                                                                }
+                                                            })()}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -626,7 +652,7 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                                     <button
                                         onClick={onGetBundle}
                                         disabled={isLoading}
-                                        className={`w-full sm:w-auto bg-[#7FC241] hover:bg-[#68A335] text-black font-bold text-base sm:text-lg px-6 py-4 rounded-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 flex items-center justify-center gap-2 group animate-pulsate-glow ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                                        className={`w-full sm:w-auto bg-[#7FC241] hover:bg-[#68A335] text-black font-bold text-xs min-[375px]:text-sm sm:text-base lg:text-lg px-4 min-[375px]:px-6 py-3 min-[375px]:py-4 rounded-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 flex items-center justify-center gap-2 group animate-pulsate-glow whitespace-nowrap ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
                                     >
                                         {isLoading ? (
                                             <>
@@ -796,7 +822,7 @@ const BundleSection: React.FC<BundleSectionProps> = ({
                     <button
                         onClick={onGetBundle}
                         disabled={isLoading}
-                        className={`bg-[#7FC241] hover:bg-[#68A335] text-black font-bold text-sm sm:text-base px-4 sm:px-6 py-2.5 sm:py-3 rounded-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 flex items-center justify-center gap-2 group whitespace-nowrap ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
+                        className={`bg-[#7FC241] hover:bg-[#68A335] text-black font-bold text-xs min-[375px]:text-sm sm:text-base px-3 min-[375px]:px-4 sm:px-6 py-2 min-[375px]:py-2.5 sm:py-3 rounded-lg shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 flex items-center justify-center gap-2 group whitespace-nowrap ${isLoading ? 'opacity-70 cursor-not-allowed' : ''}`}
                     >
                         {isLoading ? (
                             <>

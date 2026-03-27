@@ -16,7 +16,7 @@ const StickyMobileCTA = ({ onBeginAssessment, isLoading = false }: StickyMobileC
             <div className="bg-[#001C2C]/95 backdrop-blur-xl border-t border-white/10 p-4 shadow-[0_-5px_20px_rgba(0,0,0,0.5)]">
                 <Button
                     variant="primary"
-                    className={`w-full py-3 px-3 md:px-4 rounded-lg font-bold text-base md:text-lg shadow-[0_0_15px_rgba(152,208,72,0.3)] animate-pulsate-glow ${isLoading ? 'opacity-75 cursor-wait' : ''}`}
+                    className={`w-full py-3 px-2 min-[375px]:px-3 md:px-4 rounded-lg font-bold text-xs min-[320px]:text-sm min-[375px]:text-base md:text-lg shadow-[0_0_15px_rgba(152,208,72,0.3)] animate-pulsate-glow whitespace-nowrap ${isLoading ? 'opacity-75 cursor-wait' : ''}`}
                     onClick={onBeginAssessment}
                     disabled={isLoading}
                 >

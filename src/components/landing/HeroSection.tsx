@@ -148,7 +148,7 @@ const HeroSection = ({ onBeginAssessment, isLoading = false, ctaRef, roleData }:
                     <Button
                         ref={ctaRef}
                         variant="primary"
-                        className={`w-full text-base md:text-lg py-4 px-4 md:px-8 rounded-lg font-bold shadow-[0_0_20px_rgba(152,208,72,0.4)] animate-pulsate-glow hover:scale-105 transition-transform duration-300 ${isLoading ? 'opacity-75 cursor-wait' : ''}`}
+                        className={`w-full text-xs min-[320px]:text-sm min-[375px]:text-base md:text-lg py-4 px-2 min-[375px]:px-4 md:px-8 rounded-lg font-bold shadow-[0_0_20px_rgba(152,208,72,0.4)] animate-pulsate-glow hover:scale-105 transition-transform duration-300 whitespace-nowrap ${isLoading ? 'opacity-75 cursor-wait' : ''}`}
                         onClick={onBeginAssessment}
                         disabled={isLoading}
                     >
