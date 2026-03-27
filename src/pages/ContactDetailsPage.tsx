@@ -23,7 +23,7 @@ const ContactDetailsPage = () => {
         const params = new URLSearchParams();
         if (assessmentId) params.append('id', assessmentId);
         if (sessionIdParam) params.append('session_id', sessionIdParam);
-        return `/results-v4?${params.toString()}`;
+        return `/results?${params.toString()}`;
     };
 
     // Available profile images

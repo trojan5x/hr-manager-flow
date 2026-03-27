@@ -7,7 +7,7 @@ import { getStoredSessionId, getStoredBundleId, getStoredRole, getStoredProgress
 import { analytics } from '../services/analytics';
 import { supabase } from '../services/supabaseClient';
 import { MOCK_ASSESSMENT } from '../data/staticData';
-import { getCertificatesByRole, fetchBundleProducts, createPaymentOrder } from '../services/api';
+import { getCertificatesByRole, fetchBundleProducts, createPaymentOrder, generateAIInsights } from '../services/api';
 import type { AssessmentReportData, BundleProductData } from '../types';
 
 // Razorpay configuration from environment variable
@@ -16,6 +16,155 @@ const RAZORPAY_KEY = import.meta.env.VITE_RAZORPAY_KEY || '';
 // Debug: Log the key status for development
 console.log('🔑 Razorpay Key Status:', RAZORPAY_KEY ? 'Key found' : 'Key missing - check VITE_RAZORPAY_KEY environment variable');
 console.log('🌍 Environment:', RAZORPAY_KEY?.startsWith('rzp_test_') ? 'TEST MODE' : RAZORPAY_KEY?.startsWith('rzp_live_') ? 'LIVE MODE' : 'UNKNOWN');
+
+/**
+ * Generate strengths based on assessment performance data (FALLBACK)
+ */
+const generateStrengthsFromData = (scoreBreakdown: any[]) => {
+  const strengths: { category: string; description: string; evidence: string }[] = [];
+  
+  // Ensure scoreBreakdown exists and has data
+  if (!scoreBreakdown || scoreBreakdown.length === 0) {
+    return [{
+      category: 'Assessment', 
+      description: 'Assessment Participation',
+      evidence: 'Successfully participated in the comprehensive skill assessment'
+    }];
+  }
+  
+  // Find top performing phases (80% or above)
+  const topPhases = scoreBreakdown.filter(phase => phase.phase_score >= 80);
+  
+  topPhases.forEach(phase => {
+    const skillMapping: { [key: string]: string } = {
+      'Strategic Planning': 'Strategic Vision',
+      'Workforce Planning': 'Workforce Strategy',
+      'Team Leadership': 'Leadership Excellence', 
+      'Communication': 'Communication Mastery',
+      'Problem Solving': 'Analytical Thinking',
+      'Technical Skills': 'Technical Proficiency',
+      'Project Management': 'Project Management',
+      'Decision Making': 'Decision Making',
+      'Stakeholder Management': 'Stakeholder Relations'
+    };
+    
+    const skillName = phase.skill_name || phase.phase_name || 'General Skill';
+    const strengthTitle = skillMapping[skillName] || `${skillName} Proficiency`;
+    
+    strengths.push({
+      category: skillName,
+      description: strengthTitle,
+      evidence: `Scored ${phase.phase_score}% (${phase.phase_correct_answers}/${phase.phase_total_questions}) in ${phase.phase_name} scenarios`
+    });
+  });
+  
+  // If no high scores, find the best performing areas
+  if (strengths.length === 0) {
+    const bestPhase = scoreBreakdown.reduce((max, phase) => 
+      (phase.phase_score || 0) > (max.phase_score || 0) ? phase : max, 
+      scoreBreakdown[0] || { phase_score: 0 }
+    );
+    
+    if (bestPhase && bestPhase.phase_score > 0) {
+      strengths.push({
+        category: bestPhase.skill_name || bestPhase.phase_name || 'General',
+        description: `Relative Strength in ${bestPhase.skill_name || bestPhase.phase_name || 'Assessment Area'}`,
+        evidence: `Best performance area with ${bestPhase.phase_score}% accuracy`
+      });
+    }
+  }
+  
+  // Add consistency strength if user performed well across multiple areas
+  const consistentScores = scoreBreakdown.filter(phase => (phase.phase_score || 0) >= 60);
+  if (consistentScores.length >= 3) {
+    strengths.push({
+      category: 'Performance',
+      description: 'Consistent Performance',
+      evidence: `Maintained above-average performance across ${consistentScores.length} skill areas`
+    });
+  }
+  
+  // Always return at least one strength
+  if (strengths.length === 0) {
+    strengths.push({
+      category: 'Engagement', 
+      description: 'Assessment Completion',
+      evidence: 'Successfully completed the comprehensive skill assessment'
+    });
+  }
+  
+  return strengths;
+};
+
+/**
+ * Generate weaknesses based on assessment performance data (FALLBACK)
+ */
+const generateWeaknessesFromData = (scoreBreakdown: any[]) => {
+  const weaknesses: { category: string; description: string; recommendation: string }[] = [];
+  
+  // Ensure scoreBreakdown exists and has data
+  if (!scoreBreakdown || scoreBreakdown.length === 0) {
+    return [{
+      category: 'Continuous Learning',
+      description: 'Skill Development',
+      recommendation: 'Continue building expertise through targeted training and real-world application'
+    }];
+  }
+  
+  // Find weak performing phases (below 60%)
+  const weakPhases = scoreBreakdown.filter(phase => (phase.phase_score || 0) < 60);
+  
+  weakPhases.forEach(phase => {
+    const improvementMap: { [key: string]: string } = {
+      'Strategic Planning': 'Focus on strategic thinking frameworks and long-term planning methodologies',
+      'Workforce Planning': 'Develop workforce analytics and strategic planning capabilities',
+      'Team Leadership': 'Develop leadership skills through management training and team dynamics courses',
+      'Communication': 'Enhance communication skills with presentation and interpersonal training',
+      'Problem Solving': 'Strengthen analytical thinking through case study practice and logical reasoning exercises',
+      'Technical Skills': 'Improve technical competency through hands-on training and skill-specific courses',
+      'Project Management': 'Study project management methodologies like Agile, Scrum, or PMP frameworks',
+      'Decision Making': 'Practice decision-making scenarios and learn structured decision frameworks',
+      'Stakeholder Management': 'Develop stakeholder engagement skills and relationship management techniques'
+    };
+    
+    const skillName = phase.skill_name || phase.phase_name || 'General Skill';
+    const recommendation = improvementMap[skillName] || 
+      `Focus on improving ${skillName} through targeted practice and additional training`;
+    
+    weaknesses.push({
+      category: skillName,
+      description: `Development Opportunity in ${skillName}`,
+      recommendation: recommendation
+    });
+  });
+  
+  // If no weak areas, find the relatively weaker areas for improvement
+  if (weaknesses.length === 0 && scoreBreakdown.length > 1) {
+    const weakestPhase = scoreBreakdown.reduce((min, phase) => 
+      (phase.phase_score || 0) < (min.phase_score || 100) ? phase : min,
+      scoreBreakdown[0] || { phase_score: 100 }
+    );
+    
+    if (weakestPhase && (weakestPhase.phase_score || 0) < 90) {
+      weaknesses.push({
+        category: weakestPhase.skill_name || weakestPhase.phase_name || 'General',
+        description: `Enhancement Opportunity`,
+        recommendation: `While performing well overall, there's room for growth in ${weakestPhase.skill_name || weakestPhase.phase_name || 'this area'} to achieve expert-level proficiency`
+      });
+    }
+  }
+  
+  // Always return at least one weakness for improvement
+  if (weaknesses.length === 0) {
+    weaknesses.push({
+      category: 'Continuous Learning',
+      description: 'Skill Enhancement',
+      recommendation: 'Continue building expertise through advanced training and real-world application of learned concepts'
+    });
+  }
+  
+  return weaknesses;
+};
 
 const ResultsPageV5 = () => {
     const [searchParams] = useSearchParams();
@@ -862,6 +1011,8 @@ const ResultsPageV5 = () => {
                 const scoreBreakdown: any[] = [];
                 const answerSheet: any[] = [];
 
+                console.log('🔍 SCORING DEBUG: Starting fresh calculation with correctCount=0, totalQuestions=0');
+
                 // Fetch real scenarios from API instead of using mock data
                 try {
                     const currentSessionId = sessionId || getStoredSessionId();
@@ -881,6 +1032,7 @@ const ResultsPageV5 = () => {
 
                     const realScenarios = scenariosResponse.data.scenarios;
                     console.log('RESULTS_V5: Using real scenarios for scoring:', realScenarios);
+                    console.log('🔍 SCORING DEBUG: About to start REAL scenarios scoring loop');
 
                     console.log('RESULTS_V5: Real scenarios scenario_ids:', realScenarios.map(s => s.scenario_id));
                     console.log('RESULTS_V5: Answers map keys:', Array.from(answersMap.keys()));
@@ -954,8 +1106,11 @@ const ResultsPageV5 = () => {
                         });
                     });
 
+                    console.log('🔍 SCORING DEBUG: Finished REAL scenarios scoring - correctCount:', correctCount, 'totalQuestions:', totalQuestions);
+
                 } catch (scenarioError) {
                     console.error('RESULTS_V5: Failed to fetch real scenarios, falling back to mock data:', scenarioError);
+                    console.log('🔍 SCORING DEBUG: About to start MOCK scenarios scoring loop - correctCount before:', correctCount);
                     
                     // Fallback to mock data if real scenarios fail
                     MOCK_ASSESSMENT.data.scenarios.forEach((scenario, index) => {
@@ -1008,6 +1163,8 @@ const ResultsPageV5 = () => {
                             skill_name: scenario.phase || scenario.scenario_name
                         });
                     });
+                    
+                    console.log('🔍 SCORING DEBUG: Finished MOCK scenarios scoring - correctCount:', correctCount, 'totalQuestions:', totalQuestions);
                 }
 
                 console.log(`RESULTS_V5: Calculated Score: ${correctCount}/${totalQuestions}`);
@@ -1024,40 +1181,68 @@ const ResultsPageV5 = () => {
                     console.log('RESULTS_V5: Using localStorage time_taken:', timeTaken);
                 }
 
-                const finalReportData: AssessmentReportData = {
-                    id: 999,
-                    created_at: Date.now(),
-                    specialized_sessions_id: sessionId ? 0 : 0,
-                    specialized_session_user_bundle_id: 12345,
-                    specialized_session_quiz_data_id: 888,
-                    assessment_score: correctCount.toString(),
-                    score_breakdown: scoreBreakdown,
-                    ai_summary: '',
-                    answer_sheet: answerSheet,
-                    strengths: [{ category: "Management", description: "Strategic Thinking", evidence: "Assessment" }],
-                    weaknesses: [{ category: "Tactical", description: "Execution", recommendation: "Coursework" }],
-                    time_taken_in_seconds: timeTaken,
-                    ai_skill_breakdown: []
-                };
+                    const finalReportData: AssessmentReportData = {
+                        id: 999,
+                        created_at: Date.now(),
+                        specialized_sessions_id: sessionId ? 0 : 0,
+                        specialized_session_user_bundle_id: 12345,
+                        specialized_session_quiz_data_id: 888,
+                        assessment_score: correctCount.toString(),
+                        score_breakdown: scoreBreakdown,
+                        ai_summary: '',
+                        answer_sheet: answerSheet,
+                        strengths: [], // Will be populated by AI
+                        weaknesses: [], // Will be populated by AI
+                        time_taken_in_seconds: timeTaken,
+                        ai_skill_breakdown: []
+                    };
 
                 if (isMounted) {
                     setReportData(finalReportData);
                     
                     // Calculate score
                     let finalScore = totalQuestions > 0 ? Math.round((correctCount / totalQuestions) * 100) : 0;
+                    console.log('🔍 SCORE DEBUG: Initial calculation:', {
+                        correctCount: correctCount,
+                        totalQuestions: totalQuestions,
+                        calculatedPercentage: finalScore
+                    });
+                    
+                    // Set initial data with fallback insights immediately
+                    finalReportData.strengths = generateStrengthsFromData(scoreBreakdown);
+                    finalReportData.weaknesses = generateWeaknessesFromData(scoreBreakdown);
                     
                     // Use existing database score for previously passed assessments
                     if (userAssessmentData && userAssessmentData.is_passed && userAssessmentData.score != null) {
-                        console.log('RESULTS_V5: Found passed assessment with database score:', userAssessmentData.score, 'calculated would be:', finalScore);
+                        console.log('🔍 SCORE DEBUG: Raw database data:', {
+                            score: userAssessmentData.score,
+                            scoreType: typeof userAssessmentData.score,
+                            totalQuestions: totalQuestions,
+                            calculatedScore: finalScore,
+                            userAssessmentData: userAssessmentData
+                        });
                         
-                        // If passed user has score below 50%, show 92% instead
-                        if (userAssessmentData.score < 50) {
-                            console.log('RESULTS_V5: Database score below 50% for passed user, using 92% instead of:', userAssessmentData.score);
-                            finalScore = 92;
-                        } else {
-                            console.log('RESULTS_V5: Using existing database score:', userAssessmentData.score);
-                            finalScore = userAssessmentData.score;
+                        // Let's check what format the score is actually in
+                        const rawScore = userAssessmentData.score;
+                        
+                        // If score is already a reasonable percentage (between 0-100), use it directly
+                        if (rawScore >= 0 && rawScore <= 100) {
+                            console.log('🔍 SCORE DEBUG: Score appears to be percentage format, using directly:', rawScore);
+                            finalScore = Math.round(rawScore);
                         }
+                        // If score is a count (typically 0-25), convert to percentage
+                        else if (rawScore >= 0 && rawScore <= totalQuestions && totalQuestions > 0) {
+                            const scoreAsPercentage = Math.round((rawScore / totalQuestions) * 100);
+                            console.log('🔍 SCORE DEBUG: Score appears to be count format, converting:', rawScore, '/', totalQuestions, '=', scoreAsPercentage, '%');
+                            finalScore = scoreAsPercentage;
+                        }
+                        // If score is unreasonable, use calculated score instead
+                        else {
+                            console.log('🔍 SCORE DEBUG: Score format unclear, using calculated score:', finalScore);
+                            // Keep the calculated finalScore as is
+                        }
+                        
+                        console.log('🔍 SCORE DEBUG: Final score decision:', finalScore);
                     }
                     
                     // Update score state (Percentage)
@@ -1078,11 +1263,54 @@ const ResultsPageV5 = () => {
                         time_taken_in_seconds: timeTaken,
                         score_breakdown: scoreBreakdown,
                         answer_sheet: answerSheet,
+                        strengths: finalReportData.strengths, // ✨ PRESERVE STRENGTHS
+                        weaknesses: finalReportData.weaknesses, // ✨ PRESERVE WEAKNESSES
                         ai_summary: userAssessmentData?.ai_summary || ''
                     } as unknown as AssessmentReportData & { user_id?: number };
 
                     console.log('✅ RESULTS_V5: Setting complete report data with user_id:', completeReportData.user_id);
                     setReportData(completeReportData);
+                    
+                    // Generate AI insights asynchronously AFTER setting initial data
+                    if (sessionId) {
+                        console.log('🤖 Starting async AI insights generation...');
+                        const storedRole = getStoredRole() || 'HR Manager';
+                        
+                        generateAIInsights(
+                            sessionId,
+                            scoreBreakdown,
+                            answerSheet,
+                            finalScore,
+                            totalQuestions,
+                            correctCount,
+                            storedRole
+                        ).then(aiInsights => {
+                            if (aiInsights.success && aiInsights.data?.strengths && aiInsights.data?.weaknesses) {
+                                console.log('🤖 AI insights loaded, updating UI:', {
+                                    strengths: aiInsights.data.strengths.length,
+                                    weaknesses: aiInsights.data.weaknesses.length
+                                });
+                                console.log('🤖 AI strengths:', aiInsights.data.strengths);
+                                console.log('🤖 AI weaknesses:', aiInsights.data.weaknesses);
+                                
+                                // Update the report data with AI insights
+                                setReportData(prevData => {
+                                    if (!prevData) return prevData;
+                                    const updatedData = {
+                                        ...prevData,
+                                        strengths: aiInsights.data!.strengths,
+                                        weaknesses: aiInsights.data!.weaknesses
+                                    };
+                                    console.log('🤖 Updated reportData with AI insights:', updatedData);
+                                    return updatedData;
+                                });
+                            } else {
+                                console.log('🤖 AI insights failed, keeping fallback:', aiInsights.error || 'Invalid response structure');
+                            }
+                        }).catch(aiError => {
+                            console.error('🤖 AI insights error:', aiError);
+                        });
+                    }
                     
                     setIsLoading(false);
 
@@ -1328,18 +1556,39 @@ const ResultsPageV5 = () => {
 
     // Track purchase area visibility for sticky CTA
     useEffect(() => {
-        const purchaseSection = document.getElementById('purchase-certificates-section');
-        if (!purchaseSection) return;
+        const checkPurchaseVisibility = () => {
+            const purchaseSection = document.getElementById('purchase-certificates-section');
+            if (!purchaseSection) return;
 
-        const observer = new IntersectionObserver(
-            ([entry]) => {
-                setIsPurchaseAreaVisible(entry.isIntersecting);
-            },
-            { threshold: 0.1, rootMargin: '-100px 0px' }
-        );
+            const rect = purchaseSection.getBoundingClientRect();
+            const windowHeight = window.innerHeight;
+            
+            // Consider visible if any part of the purchase section is in viewport
+            const isVisible = rect.top < windowHeight && rect.bottom > 0;
+            
+            console.log('🔍 Purchase section visibility check:', {
+                isVisible,
+                top: rect.top,
+                bottom: rect.bottom,
+                windowHeight
+            });
+            
+            setIsPurchaseAreaVisible(isVisible);
+        };
 
-        observer.observe(purchaseSection);
-        return () => observer.disconnect();
+        checkPurchaseVisibility();
+        
+        const handleScroll = () => {
+            requestAnimationFrame(checkPurchaseVisibility);
+        };
+
+        window.addEventListener('scroll', handleScroll);
+        window.addEventListener('resize', checkPurchaseVisibility);
+        
+        return () => {
+            window.removeEventListener('scroll', handleScroll);
+            window.removeEventListener('resize', checkPurchaseVisibility);
+        };
     }, [bundleData]);
 
     // Scroll to purchase section
@@ -1372,10 +1621,10 @@ const ResultsPageV5 = () => {
                     
                     @keyframes shine {
                         0% {
-                            transform: translateX(-100%);
+                            left: -100%;
                         }
                         100% {
-                            transform: translateX(100%);
+                            left: 100%;
                         }
                     }
                     
@@ -1388,18 +1637,19 @@ const ResultsPageV5 = () => {
                         content: '';
                         position: absolute;
                         top: 0;
-                        left: 0;
-                        width: 100%;
+                        left: -100%;
+                        width: 40%;
                         height: 100%;
                         background: linear-gradient(
                             90deg,
                             transparent,
-                            rgba(255, 255, 255, 0.2),
+                            rgba(255, 255, 255, 0.15),
                             transparent
                         );
-                        transform: translateX(-100%);
-                        animation: shine 3s ease-in-out infinite;
+                        transform: skewX(-20deg);
+                        animation: shine 4s ease-in-out infinite;
                         pointer-events: none;
+                        z-index: 1;
                     }
                     
                     @keyframes slide-up {
@@ -1451,23 +1701,26 @@ const ResultsPageV5 = () => {
                             </p>
                         </div>
 
-                        {/* Your Performance Card */}
-                        {!isLoading && (
-                            <div className="w-full max-w-lg mx-auto animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
-                                {/* Loading State */}
-                                {isLoading && (
-                                    <div className="text-center py-12">
-                                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#98D048] mx-auto mb-4"></div>
-                                        <p className="text-gray-300">Analyzing your performance...</p>
-                                    </div>
-                                )}
+                        {/* Desktop: Side by Side Layout for Performance & Certificate */}
+                        <div className="w-full max-w-6xl mx-auto">
+                            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+                                {/* Your Performance Card */}
+                                {!isLoading && (
+                                    <div className="animate-fade-in-up" style={{ animationDelay: '0.4s' }}>
+                                        {/* Loading State */}
+                                        {isLoading && (
+                                            <div className="text-center py-12">
+                                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#98D048] mx-auto mb-4"></div>
+                                                <p className="text-gray-300">Analyzing your performance...</p>
+                                            </div>
+                                        )}
 
-                                {/* Error State */}
-                                {apiError && !isLoading && (
-                                    <div className="w-full bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-center">
-                                        <p className="text-red-400 text-sm">{apiError}</p>
-                                    </div>
-                                )}
+                                        {/* Error State */}
+                                        {apiError && !isLoading && (
+                                            <div className="w-full bg-red-500/10 border border-red-500/20 rounded-lg p-4 text-center">
+                                                <p className="text-red-400 text-sm">{apiError}</p>
+                                            </div>
+                                        )}
 
                                 {/* Performance Card */}
                                 {!isLoading && !apiError && reportData && (
@@ -1617,9 +1870,9 @@ const ResultsPageV5 = () => {
                             </div>
                         )}
 
-                        {/* Get Your Certificate Card */}
-                        {!isLoading && !apiError && score >= 50 && (
-                            <div id="purchase-certificates-section" className="w-full max-w-lg mx-auto animate-fade-in-up" style={{ animationDelay: '0.6s' }}>
+                                {/* Get Your Certificate Card */}
+                                {!isLoading && !apiError && score >= 50 && (
+                                    <div id="purchase-certificates-section" className="animate-fade-in-up" style={{ animationDelay: '0.6s' }}>
                                 <div className="bg-white/5 backdrop-blur-sm border border-white/10 rounded-xl p-6">
                                     {/* Header */}
                                     <div className="flex items-center gap-3 mb-6">
@@ -1688,8 +1941,8 @@ const ResultsPageV5 = () => {
                                                         : 'bg-[#1C2534] border border-transparent'
                                                 }`}
                                             >
-                                                <div className="flex items-start gap-4">
-                                                    {/* Radio Button */}
+                                                {/* Header Row - Radio Button + Title + Badge */}
+                                                <div className="flex items-start gap-4 mb-4">
                                                     <div className="mt-1">
                                                         <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
                                                             selectedPurchaseOption === 'individual' ? 'border-[#00E599]' : 'border-gray-500'
@@ -1697,32 +1950,106 @@ const ResultsPageV5 = () => {
                                                             {selectedPurchaseOption === 'individual' && <div className="w-3 h-3 bg-[#00E599] rounded-full"></div>}
                                                         </div>
                                                     </div>
-                                                    
-                                                    {/* Content */}
-                                                    <div className="flex-1">
-                                                        {/* Header Row - Title and Badge */}
-                                                        <div className="flex items-start gap-2 mb-3">
-                                                            <h4 className="text-white font-bold text-lg sm:text-xl flex-1">Individual Certificate</h4>
-                                                            {selectedPurchaseOption === 'individual' && (
-                                                                <span className="bg-[#00E599] text-black text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">
-                                                                    SELECTED
-                                                                </span>
-                                                            )}
-                                                        </div>
-                                                        
-                                                        {/* Description */}
-                                                        <div className="text-gray-400 text-sm mb-3">
-                                                            Includes digital certificate, verification badge, and lifetime access
-                                                        </div>
-                                                        
-                                                        {/* Price Section */}
-                                                        <div className="flex items-center justify-between">
-                                                            <div className="text-gray-500 text-xs">
-                                                                Certificate Cost
+                                                    <div className="flex-1 flex items-start justify-between gap-2">
+                                                        <h4 className="text-white font-bold text-lg sm:text-xl">Individual Certificate</h4>
+                                                        {selectedPurchaseOption === 'individual' && (
+                                                            <span className="bg-[#00E599] text-black text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">
+                                                                SELECTED
+                                                            </span>
+                                                        )}
+                                                    </div>
+                                                </div>
+                                                
+                                                {/* Content Section - Full Width */}
+                                                <div className="space-y-4">
+                                                    {/* Description */}
+                                                    <div className="text-gray-400 text-sm">
+                                                        Includes digital certificate, verification badge, and lifetime access
+                                                    </div>
+
+                                                    {/* Certificate Details */}
+                                                    {primaryCertificate && (
+                                                        <div>
+                                                            <div className="text-white text-sm mb-2 font-medium">You will receive:</div>
+                                                            <div className="flex items-start gap-2 text-xs text-gray-300">
+                                                                <FontAwesomeIcon icon={faCertificate} className="w-3 h-3 text-[#00E599] mt-0.5 flex-shrink-0" />
+                                                                <div className="leading-tight">
+                                                                    <span className="text-[#00E599] font-semibold">
+                                                                        {primaryCertificate.certification_name_short}
+                                                                    </span>
+                                                                    {primaryCertificate.certification_name_short && primaryCertificate.certification_name && (
+                                                                        <span className="text-gray-300"> - {primaryCertificate.certification_name}</span>
+                                                                    )}
+                                                                </div>
                                                             </div>
-                                                            <div className="text-xl font-bold text-white">₹1,999</div>
+                                                        </div>
+                                                    )}
+
+                                                    {/* Placement Support Addon for Individual */}
+                                                    <div className="p-2.5 sm:p-3 bg-[#0B1426] rounded-lg border border-gray-600">
+                                                        <div 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                if (selectedPurchaseOption === 'individual') {
+                                                                    setSelectedAddon(!selectedAddon);
+                                                                }
+                                                            }}
+                                                            className="cursor-pointer space-y-0"
+                                                        >
+                                                            {/* First Row: Checkbox + Title + Price */}
+                                                            <div className="flex items-center gap-2.5 sm:gap-3">
+                                                                <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                                                                    selectedPurchaseOption === 'individual' && selectedAddon 
+                                                                        ? 'bg-[#FF9500] border-[#FF9500]' 
+                                                                        : 'border-gray-500'
+                                                                }`}>
+                                                                    {selectedPurchaseOption === 'individual' && selectedAddon && (
+                                                                        <FontAwesomeIcon icon={faCheckCircle} className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />
+                                                                    )}
+                                                                </div>
+                                                                <div className="flex-1">
+                                                                    <p className="text-white text-xs sm:text-sm font-medium">Add Placement Support</p>
+                                                                </div>
+                                                                <div className="flex-shrink-0">
+                                                                    <span className="text-[#FF9500] font-bold text-xs sm:text-sm">+₹999</span>
+                                                                </div>
+                                                            </div>
+                                                            {/* Second Row: Description */}
+                                                            <div className="ml-7 sm:ml-8">
+                                                                <p className="text-gray-400 text-xs leading-tight">Career guidance & interview prep</p>
+                                                            </div>
                                                         </div>
                                                     </div>
+                                                    
+                                                    {/* Price Section */}
+                                                    <div className="flex items-center justify-between">
+                                                        <div className="text-gray-500 text-xs">
+                                                            Total Cost
+                                                        </div>
+                                                        <div className="text-xl font-bold text-white">
+                                                            ₹{selectedPurchaseOption === 'individual' && selectedAddon ? '2,998' : '1,999'}
+                                                        </div>
+                                                    </div>
+
+                                                    {/* Purchase Button for Individual */}
+                                                    {selectedPurchaseOption === 'individual' && (
+                                                        <button 
+                                                            onClick={(e) => {
+                                                                e.stopPropagation();
+                                                                handlePurchase();
+                                                            }}
+                                                            disabled={isPurchasing}
+                                                            className="w-full bg-[#00E599] hover:bg-[#00D48A] disabled:bg-[#00E599]/50 disabled:cursor-not-allowed text-black font-bold py-2.5 px-4 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
+                                                        >
+                                                            <FontAwesomeIcon icon={faCreditCard} className={`w-4 h-4 ${isPurchasing ? 'animate-spin' : ''}`} />
+                                                            <span className="text-sm">
+                                                                {isPurchasing 
+                                                                    ? 'Processing...'
+                                                                    : `Purchase Certificate${selectedAddon ? ' + Support' : ''}`
+                                                                }
+                                                            </span>
+                                                        </button>
+                                                    )}
                                                 </div>
                                             </div>
 
@@ -1732,12 +2059,12 @@ const ResultsPageV5 = () => {
                                                     onClick={() => setSelectedPurchaseOption('bundle')}
                                                     className={`relative cursor-pointer rounded-xl p-4 transition-all duration-200 shine-effect ${
                                                         selectedPurchaseOption === 'bundle' 
-                                                            ? 'bg-gradient-to-br from-purple-400/20 via-purple-500/15 to-blue-500/20 border-2 border-[#B066FF] shadow-lg shadow-purple-500/25' 
-                                                            : 'bg-gradient-to-br from-purple-400/10 via-purple-500/8 to-blue-500/10 border border-purple-400/30'
+                                                            ? 'bg-gradient-to-br from-purple-400/30 via-purple-500/25 to-blue-500/30 border-2 border-[#B066FF] shadow-lg shadow-purple-500/25' 
+                                                            : 'bg-gradient-to-br from-purple-800/60 via-purple-700/50 to-purple-900/55 border border-purple-400/60'
                                                     }`}
                                                 >
-                                                    <div className="flex items-start gap-4">
-                                                        {/* Radio Button */}
+                                                    {/* Header Row - Radio Button + Title + Badge */}
+                                                    <div className="flex items-start gap-4 mb-4">
                                                         <div className="mt-1">
                                                             <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center ${
                                                                 selectedPurchaseOption === 'bundle' ? 'border-[#B066FF]' : 'border-gray-500'
@@ -1745,116 +2072,218 @@ const ResultsPageV5 = () => {
                                                                 {selectedPurchaseOption === 'bundle' && <div className="w-3 h-3 bg-[#B066FF] rounded-full"></div>}
                                                             </div>
                                                         </div>
-                                                        
-                                                        {/* Content */}
-                                                        <div className="flex-1">
-                                                            {/* Header Row - Title and Badge */}
-                                                            <div className="flex items-start gap-2 mb-4">
-                                                                <h4 className="text-white font-bold text-lg sm:text-xl flex-1">{derivedRole} Power Pack</h4>
-                                                                <span className="bg-gradient-to-r from-[#B066FF] to-purple-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 shadow-sm">
-                                                                    Power Pack
-                                                                </span>
-                                                            </div>
-                                                            
-                                                            {/* Certificate List */}
-                                                            <div className="mb-4">
-                                                                <div className="text-white text-sm mb-2 font-medium">Includes {bundleData.certifications.length} certificates:</div>
-                                                                <div className="space-y-1">
-                                                                    {bundleData.certifications.slice(0, 3).map((cert: any) => (
-                                                                        <div key={cert.skill_id} className="flex items-start gap-2 text-xs text-gray-300">
-                                                                            <FontAwesomeIcon icon={faCheckCircle} className="w-3 h-3 text-[#00E599] mt-0.5" />
-                                                                            <span>{cert.certification_name_short || cert.certification_name}</span>
-                                                                        </div>
-                                                                    ))}
-                                                                    {bundleData.certifications.length > 3 && (
-                                                                        <div className="flex items-start gap-2 text-xs text-gray-300">
-                                                                            <FontAwesomeIcon icon={faCheckCircle} className="w-3 h-3 text-[#00E599] mt-0.5" />
-                                                                            <span>+{bundleData.certifications.length - 3} more certificates</span>
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            </div>
-                                                            
-                                                            {/* Price Section */}
-                                                            <div className="flex items-center justify-between mb-3">
-                                                                <div className="text-gray-400 text-xs">Bundle Price</div>
-                                                                <div className="text-xl font-bold text-[#B066FF]">₹4,999</div>
-                                                            </div>
-                                                            
-                                                            {/* Savings Banner */}
-                                                            {bundleData.bundle_original_price && bundleData.bundle_price && (
-                                                                <div className="bg-gradient-to-r from-green-900/50 to-emerald-900/50 rounded-lg p-2 text-center text-[#00E599] text-xs font-bold border border-green-700/30">
-                                                                    You save ₹{(bundleData.bundle_original_price - bundleData.bundle_price).toLocaleString("en-IN")} 
-                                                                    ({Math.round(((bundleData.bundle_original_price - bundleData.bundle_price) / bundleData.bundle_original_price) * 100)}% off)
-                                                                </div>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            )}
-
-                                            {/* Placement Support Addon */}
-                                            <div 
-                                                onClick={() => setSelectedAddon(!selectedAddon)}
-                                                className={`relative cursor-pointer rounded-xl p-4 transition-all duration-200 ${
-                                                    selectedAddon 
-                                                        ? 'bg-[#1C2534] border border-[#FF9500]' 
-                                                        : 'bg-[#1C2534] border border-transparent'
-                                                }`}
-                                            >
-                                                <div className="flex items-start gap-4">
-                                                    {/* Checkbox */}
-                                                    <div className="mt-1">
-                                                        <div className={`w-6 h-6 rounded border-2 flex items-center justify-center ${
-                                                            selectedAddon ? 'bg-[#FF9500] border-[#FF9500]' : 'border-gray-500'
-                                                        }`}>
-                                                            {selectedAddon && <FontAwesomeIcon icon={faCheckCircle} className="w-3 h-3 text-white" />}
+                                                        <div className="flex-1 flex items-start justify-between gap-2">
+                                                            <h4 className="text-white font-bold text-lg sm:text-xl">{derivedRole} Power Pack</h4>
+                                                            <span className="bg-gradient-to-r from-[#B066FF] to-purple-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0 shadow-sm">
+                                                                Power Pack
+                                                            </span>
                                                         </div>
                                                     </div>
                                                     
-                                                    {/* Content */}
-                                                    <div className="flex-1">
-                                                        {/* Header Row - Title and Badge */}
-                                                        <div className="flex items-start gap-2 mb-3">
-                                                            <h4 className="text-white font-bold text-lg sm:text-xl flex-1">Placement Support Addon</h4>
-                                                            <span className="bg-orange-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full flex-shrink-0">
-                                                                OPTIONAL
-                                                            </span>
-                                                        </div>
-                                                        
+                                                    {/* Content Section - Full Width */}
+                                                    <div className="space-y-4">
                                                         {/* Description */}
-                                                        <div className="text-gray-400 text-sm mb-3">
-                                                            Get personalized career guidance, resume review, and interview preparation
+                                                        <div className="text-gray-300 text-sm">
+                                                            Each certificate includes digital certificate, verification badge, and lifetime access
+                                                        </div>
+
+                                                        {/* Certificate List */}
+                                                        <div>
+                                                            <div className="text-white text-sm mb-2 font-medium">Includes {bundleData.certifications.length} certificates:</div>
+                                                            <div className="grid grid-cols-1 gap-2">
+                                                                {bundleData.certifications.slice(0, 5).map((cert: any) => (
+                                                                    <div key={cert.skill_id} className="flex items-start gap-2 text-xs text-gray-300">
+                                                                        <FontAwesomeIcon icon={faCheckCircle} className="w-3 h-3 text-[#00E599] mt-0.5 flex-shrink-0" />
+                                                                        <div className="leading-tight">
+                                                                            <span className="text-[#B066FF] font-semibold">{cert.certification_name_short || cert.short_name}</span>
+                                                                            {cert.certification_name_short && cert.certification_name && (
+                                                                                <span className="text-gray-300"> - {cert.certification_name}</span>
+                                                                            )}
+                                                                        </div>
+                                                                    </div>
+                                                                ))}
+                                                                {bundleData.certifications.length > 5 && (
+                                                                    <div className="flex items-start gap-2 text-xs text-gray-300 mt-1">
+                                                                        <FontAwesomeIcon icon={faCheckCircle} className="w-3 h-3 text-[#00E599] mt-0.5 flex-shrink-0" />
+                                                                        <span>+{bundleData.certifications.length - 5} more certificates</span>
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        </div>
+
+                                                        {/* Placement Support Addon for Bundle */}
+                                                        <div className="p-2.5 sm:p-3 bg-purple-900/30 rounded-lg border border-purple-400/40">
+                                                            <div 
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    if (selectedPurchaseOption === 'bundle') {
+                                                                        setSelectedAddon(!selectedAddon);
+                                                                    }
+                                                                }}
+                                                                className="cursor-pointer space-y-0"
+                                                            >
+                                                                {/* First Row: Checkbox + Title + Price */}
+                                                                <div className="flex items-center gap-2.5 sm:gap-3">
+                                                                    <div className={`w-4 h-4 sm:w-5 sm:h-5 rounded border-2 flex items-center justify-center flex-shrink-0 ${
+                                                                        selectedPurchaseOption === 'bundle' && selectedAddon 
+                                                                            ? 'bg-[#FF9500] border-[#FF9500]' 
+                                                                            : 'border-gray-500'
+                                                                    }`}>
+                                                                        {selectedPurchaseOption === 'bundle' && selectedAddon && (
+                                                                            <FontAwesomeIcon icon={faCheckCircle} className="w-2.5 h-2.5 sm:w-3 sm:h-3 text-white" />
+                                                                        )}
+                                                                    </div>
+                                                                    <div className="flex-1">
+                                                                        <p className="text-white text-xs sm:text-sm font-medium">Add Placement Support</p>
+                                                                    </div>
+                                                                    <div className="flex-shrink-0">
+                                                                        <span className="text-[#FF9500] font-bold text-xs sm:text-sm">+₹999</span>
+                                                                    </div>
+                                                                </div>
+                                                                {/* Second Row: Description */}
+                                                                <div className="ml-7 sm:ml-8">
+                                                                    <p className="text-gray-300 text-xs leading-tight">Career guidance & interview prep</p>
+                                                                </div>
+                                                            </div>
                                                         </div>
                                                         
                                                         {/* Price Section */}
                                                         <div className="flex items-center justify-between">
-                                                            <div className="text-gray-500 text-xs">
-                                                                Add-on Cost
+                                                            <div className="text-gray-400 text-xs">Total Cost (Save ₹2,000+)</div>
+                                                            <div className="text-xl font-bold text-[#B066FF]">
+                                                                ₹{selectedPurchaseOption === 'bundle' && selectedAddon ? '5,998' : '4,999'}
                                                             </div>
-                                                            <div className="text-xl font-bold text-white">+₹999</div>
                                                         </div>
+                                                        
+                                                        {/* Savings Banner */}
+                                                        {bundleData.bundle_original_price && bundleData.bundle_price && (
+                                                            <div className="bg-gradient-to-r from-green-900/50 to-emerald-900/50 rounded-lg p-2 text-center text-[#00E599] text-xs font-bold border border-green-700/30">
+                                                                You save ₹{(bundleData.bundle_original_price - bundleData.bundle_price).toLocaleString("en-IN")} 
+                                                                ({Math.round(((bundleData.bundle_original_price - bundleData.bundle_price) / bundleData.bundle_original_price) * 100)}% off)
+                                                            </div>
+                                                        )}
+
+                                                        {/* Purchase Button for Bundle */}
+                                                        {selectedPurchaseOption === 'bundle' && (
+                                                            <button 
+                                                                onClick={(e) => {
+                                                                    e.stopPropagation();
+                                                                    handlePurchase();
+                                                                }}
+                                                                disabled={isPurchasing}
+                                                                className="w-full bg-gradient-to-r from-[#B066FF] to-purple-600 hover:from-[#9F4FFF] hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2.5 px-4 rounded-lg transition-all duration-200 flex items-center justify-center gap-2 shadow-lg"
+                                                            >
+                                                                <FontAwesomeIcon icon={faCreditCard} className={`w-4 h-4 ${isPurchasing ? 'animate-spin' : ''}`} />
+                                                                <span className="text-sm">
+                                                                    {isPurchasing 
+                                                                        ? 'Processing...'
+                                                                        : `Purchase Power Pack${selectedAddon ? ' + Support' : ''}`
+                                                                    }
+                                                                </span>
+                                                            </button>
+                                                        )}
                                                     </div>
                                                 </div>
+                                            )}
+
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                            </div> {/* End grid */}
+                        </div> {/* End container */}
+
+                        {/* Strengths & Weaknesses Section */}
+                        {reportData && (
+                            <div className="w-full max-w-4xl mx-auto mt-12 animate-fade-in-up">
+                                {/* Section Header */}
+                                <div className="text-center mb-10 sm:mb-12 px-4">
+                                    <h2 className="text-2xl sm:text-3xl md:text-4xl font-bold text-white mb-4">
+                                        Your Performance Insights
+                                    </h2>
+                                    <div className="h-1 w-20 bg-gradient-to-r from-[#00E599] to-[#4285F4] rounded-full mx-auto mb-4"></div>
+                                    <p className="text-gray-300 max-w-2xl mx-auto text-base sm:text-lg">
+                                        Based on your assessment performance, here are your key strengths and areas for growth
+                                    </p>
+                                </div>
+
+                                <div className="grid md:grid-cols-2 gap-6 px-2 sm:px-4 mb-8">
+                                    {/* Strengths Section */}
+                                    {reportData.strengths && reportData.strengths.length > 0 && (
+                                        <div className="bg-gradient-to-br from-[#0B2A3D]/60 to-[#0F3A4F]/40 rounded-xl border border-[#00E599]/20 p-6 backdrop-blur-sm">
+                                            <div className="flex items-center gap-3 mb-6">
+                                                <div className="w-10 h-10 rounded-lg bg-[#00E599]/20 flex items-center justify-center">
+                                                    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-[#00E599]">
+                                                        <path d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                    </svg>
+                                                </div>
+                                                <div>
+                                                    <h3 className="text-xl font-bold text-[#00E599]">Strengths</h3>
+                                                    <p className="text-gray-400 text-sm">Areas where you excel</p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="space-y-4">
+                                                {reportData.strengths.map((strength, index) => (
+                                                    <div key={index} className="bg-[#0B2A3D]/40 rounded-lg p-4 border border-[#00E599]/10">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="w-2 h-2 rounded-full bg-[#00E599] mt-2 flex-shrink-0"></div>
+                                                            <div className="flex-1">
+                                                                <h4 className="font-semibold text-white text-sm mb-1">
+                                                                    {strength.description}
+                                                                </h4>
+                                                                <p className="text-xs text-[#00E599] font-medium mb-2">
+                                                                    {strength.category}
+                                                                </p>
+                                                                <p className="text-gray-300 text-xs leading-relaxed">
+                                                                    {strength.evidence}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
                                             </div>
                                         </div>
+                                    )}
 
-                                        <button 
-                                            onClick={handlePurchase}
-                                            disabled={isPurchasing}
-                                            className="w-full bg-[#00E599] hover:bg-[#00D48A] disabled:bg-[#00E599]/50 disabled:cursor-not-allowed text-black font-bold py-3 px-6 rounded-lg transition-colors duration-200 flex items-center justify-center gap-2"
-                                        >
-                                            <FontAwesomeIcon icon={faCreditCard} className={`w-5 h-5 ${isPurchasing ? 'animate-spin' : ''}`} />
-                                            <span className="text-base">
-                                                {isPurchasing 
-                                                    ? 'Processing...'
-                                                    : selectedPurchaseOption === 'bundle'
-                                                        ? `Purchase Bundle${selectedAddon ? ' + Addon' : ''}`
-                                                        : `Purchase Certificate${selectedAddon ? ' + Addon' : ''}`
-                                                }
-                                            </span>
-                                        </button>
-                                    </div>
+                                    {/* Weaknesses Section */}
+                                    {reportData.weaknesses && reportData.weaknesses.length > 0 && (
+                                        <div className="bg-gradient-to-br from-[#0B2A3D]/60 to-[#2D1B3D]/40 rounded-xl border border-[#4285F4]/20 p-6 backdrop-blur-sm">
+                                            <div className="flex items-center gap-3 mb-6">
+                                                <div className="w-10 h-10 rounded-lg bg-[#4285F4]/20 flex items-center justify-center">
+                                                    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 text-[#4285F4]">
+                                                        <path d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+                                                    </svg>
+                                                </div>
+                                                <div>
+                                                    <h3 className="text-xl font-bold text-[#4285F4]">Growth Areas</h3>
+                                                    <p className="text-gray-400 text-sm">Opportunities for improvement</p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="space-y-4">
+                                                {reportData.weaknesses.map((weakness, index) => (
+                                                    <div key={index} className="bg-[#0B2A3D]/40 rounded-lg p-4 border border-[#4285F4]/10">
+                                                        <div className="flex items-start gap-3">
+                                                            <div className="w-2 h-2 rounded-full bg-[#4285F4] mt-2 flex-shrink-0"></div>
+                                                            <div className="flex-1">
+                                                                <h4 className="font-semibold text-white text-sm mb-1">
+                                                                    {weakness.description}
+                                                                </h4>
+                                                                <p className="text-xs text-[#4285F4] font-medium mb-2">
+                                                                    {weakness.category}
+                                                                </p>
+                                                                <p className="text-gray-300 text-xs leading-relaxed">
+                                                                    {weakness.recommendation}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </div>
                         )}

@@ -548,6 +548,125 @@ export const updateProgressWithRetry = async (
 };
 
 /**
+ * Generate strengths based on assessment performance data
+ */
+const generateStrengthsFromData = (scoreBreakdown: any[]) => {
+  const strengths: { category: string; description: string; evidence: string }[] = [];
+  
+  // Find top performing phases (80% or above)
+  const topPhases = scoreBreakdown.filter(phase => phase.phase_score >= 80);
+  
+  topPhases.forEach(phase => {
+    const skillMapping: { [key: string]: string } = {
+      'Strategic Planning': 'Strategic Vision',
+      'Team Leadership': 'Leadership Excellence', 
+      'Communication': 'Communication Mastery',
+      'Problem Solving': 'Analytical Thinking',
+      'Technical Skills': 'Technical Proficiency',
+      'Project Management': 'Project Management',
+      'Decision Making': 'Decision Making',
+      'Stakeholder Management': 'Stakeholder Relations'
+    };
+    
+    const skillName = phase.skill_name || phase.phase_name;
+    const strengthTitle = skillMapping[skillName] || `${skillName} Proficiency`;
+    
+    strengths.push({
+      category: skillName,
+      description: strengthTitle,
+      evidence: `Scored ${phase.phase_score}% (${phase.phase_correct_answers}/${phase.phase_total_questions}) in ${phase.phase_name} scenarios`
+    });
+  });
+  
+  // If no high scores, find the best performing areas
+  if (strengths.length === 0) {
+    const bestPhase = scoreBreakdown.reduce((max, phase) => 
+      phase.phase_score > max.phase_score ? phase : max, 
+      scoreBreakdown[0] || { phase_score: 0 }
+    );
+    
+    if (bestPhase && bestPhase.phase_score > 0) {
+      strengths.push({
+        category: bestPhase.skill_name || bestPhase.phase_name,
+        description: `Relative Strength in ${bestPhase.skill_name || bestPhase.phase_name}`,
+        evidence: `Best performance area with ${bestPhase.phase_score}% accuracy`
+      });
+    }
+  }
+  
+  // Add consistency strength if user performed well across multiple areas
+  const consistentScores = scoreBreakdown.filter(phase => phase.phase_score >= 60);
+  if (consistentScores.length >= 3) {
+    strengths.push({
+      category: 'Performance',
+      description: 'Consistent Performance',
+      evidence: `Maintained above-average performance across ${consistentScores.length} skill areas`
+    });
+  }
+  
+  return strengths.length > 0 ? strengths : [{
+    category: 'Engagement', 
+    description: 'Assessment Completion',
+    evidence: 'Successfully completed the comprehensive skill assessment'
+  }];
+};
+
+/**
+ * Generate weaknesses based on assessment performance data
+ */
+const generateWeaknessesFromData = (scoreBreakdown: any[]) => {
+  const weaknesses: { category: string; description: string; recommendation: string }[] = [];
+  
+  // Find weak performing phases (below 60%)
+  const weakPhases = scoreBreakdown.filter(phase => phase.phase_score < 60);
+  
+  weakPhases.forEach(phase => {
+    const improvementMap: { [key: string]: string } = {
+      'Strategic Planning': 'Focus on strategic thinking frameworks and long-term planning methodologies',
+      'Team Leadership': 'Develop leadership skills through management training and team dynamics courses',
+      'Communication': 'Enhance communication skills with presentation and interpersonal training',
+      'Problem Solving': 'Strengthen analytical thinking through case study practice and logical reasoning exercises',
+      'Technical Skills': 'Improve technical competency through hands-on training and skill-specific courses',
+      'Project Management': 'Study project management methodologies like Agile, Scrum, or PMP frameworks',
+      'Decision Making': 'Practice decision-making scenarios and learn structured decision frameworks',
+      'Stakeholder Management': 'Develop stakeholder engagement skills and relationship management techniques'
+    };
+    
+    const skillName = phase.skill_name || phase.phase_name;
+    const recommendation = improvementMap[skillName] || 
+      `Focus on improving ${skillName} through targeted practice and additional training`;
+    
+    weaknesses.push({
+      category: skillName,
+      description: `Development Opportunity in ${skillName}`,
+      recommendation: recommendation
+    });
+  });
+  
+  // If no weak areas, find the relatively weaker areas for improvement
+  if (weaknesses.length === 0 && scoreBreakdown.length > 1) {
+    const weakestPhase = scoreBreakdown.reduce((min, phase) => 
+      phase.phase_score < min.phase_score ? phase : min,
+      scoreBreakdown[0] || { phase_score: 100 }
+    );
+    
+    if (weakestPhase && weakestPhase.phase_score < 90) {
+      weaknesses.push({
+        category: weakestPhase.skill_name || weakestPhase.phase_name,
+        description: `Enhancement Opportunity`,
+        recommendation: `While performing well overall, there's room for growth in ${weakestPhase.skill_name || weakestPhase.phase_name} to achieve expert-level proficiency`
+      });
+    }
+  }
+  
+  return weaknesses.length > 0 ? weaknesses : [{
+    category: 'Continuous Learning',
+    description: 'Skill Enhancement',
+    recommendation: 'Continue building expertise through advanced training and real-world application of learned concepts'
+  }];
+};
+
+/**
  * Fetch assessment report - LOGIC
  * Calculates score from LocalStorage answers against Static Data
  */
@@ -771,12 +890,8 @@ export const fetchAssessmentReport = async (
       score_breakdown: scoreBreakdown,
       ai_summary: "",
       answer_sheet: answerSheet,
-      strengths: [
-          { category: "Management", description: "Strategic Thinking", evidence: "Consistent performance in planning scenarios." }
-      ],
-      weaknesses: [
-          { category: "Tactical", description: "Execution Details", recommendation: "Review detailed process steps." }
-      ],
+      strengths: generateStrengthsFromData(scoreBreakdown),
+      weaknesses: generateWeaknessesFromData(scoreBreakdown),
       time_taken_in_seconds: finalTime
     }
   };
@@ -2124,6 +2239,69 @@ export const getUserByEmail = async (email: string): Promise<UserLookupResponse>
             result: 'error',
             message: 'Failed to retrieve user data',
             data: null
+        };
+    }
+};
+
+/**
+ * Generate AI-powered assessment insights using Supabase Edge Function
+ */
+export const generateAIInsights = async (
+    sessionId: string,
+    scoreBreakdown: any[],
+    answerSheet: any[],
+    overallScore: number,
+    totalQuestions: number,
+    correctAnswers: number,
+    role: string = 'HR Manager'
+): Promise<{
+    success: boolean;
+    data?: {
+        strengths: Array<{ category: string; description: string; evidence: string }>;
+        weaknesses: Array<{ category: string; description: string; recommendation: string }>;
+    };
+    strengths?: Array<{ category: string; description: string; evidence: string }>;
+    weaknesses?: Array<{ category: string; description: string; recommendation: string }>;
+    error?: string;
+}> => {
+    console.log(`API: Generating AI insights for session ${sessionId}`);
+    
+    try {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/generate-ai-insights`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`,
+                'apikey': SUPABASE_ANON_KEY
+            },
+            body: JSON.stringify({
+                session_id: sessionId,
+                score_breakdown: scoreBreakdown,
+                answer_sheet: answerSheet,
+                overall_score: overallScore,
+                total_questions: totalQuestions,
+                correct_answers: correctAnswers,
+                role: role
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('AI insights generation error:', errorText);
+            throw new Error(`HTTP error! status: ${response.status}, message: ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('AI insights generation response:', result);
+        
+        return result;
+    } catch (error) {
+        console.error('Error generating AI insights:', error);
+        
+        // Return fallback insights if AI fails
+        return {
+            success: false,
+            error: (error as Error).message || 'Failed to generate AI insights'
         };
     }
 };

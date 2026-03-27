@@ -1,4 +1,4 @@
-import { Routes, Route, useSearchParams } from 'react-router-dom';
+import { Routes, Route, useSearchParams, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import Homepage from './pages/Homepage';
 // import RolePage from './pages/RolePage';
@@ -17,8 +17,8 @@ import PaymentSuccessPage from './pages/PaymentSuccessPage';
 import SimpleResultsPage from './pages/SimpleResultsPage';
 import ResultsPageV2 from './pages/ResultsPageV2';
 import ResultsPageV3 from './pages/ResultsPageV3';
-import ResultsPageV4 from './pages/ResultsPageV4';
 import ResultsPageV5 from './pages/ResultsPageV5';
+import ResultsPageV6 from './pages/ResultsPageV6';
 // import AssessmentPageVariant from './pages/AssessmentPageVariant';
 import AssessmentPage from './pages/AssessmentPage';
 import FunnelDashboard from './pages/admin/FunnelDashboard';
@@ -46,8 +46,9 @@ function App() {
       <Route path="/results-v2" element={<SimpleResultsPage />} />
       <Route path="/results-v2-page" element={<ResultsPageV2 />} />
       <Route path="/results-v3" element={<ResultsPageV3 />} />
-      <Route path="/results-v4" element={<ResultsPageV4 />} />
+      <Route path="/results-v4" element={<RedirectToV5 />} />
       <Route path="/results-v5" element={<ResultsPageV5 />} />
+      <Route path="/results-v6" element={<ResultsPageV6 />} />
       <Route path="/assessment-variant" element={<AssessmentPage />} />
       <Route path="/role-variant" element={<RolePageVariant />} />
       <Route path="/admin/dashboard" element={<FunnelDashboard />} />
@@ -68,7 +69,7 @@ function ResultsRouter() {
     return <SimpleResultsPage />;
   }
 
-  // Default to ResultsPageV5 (now fixed)
+  // Default to ResultsPageV5 (restored as default)
   return <ResultsPageV5 />;
 }
 
@@ -112,6 +113,16 @@ function HomeOrRole() {
   }
 
   return <Homepage />;
+}
+
+function RedirectToV5() {
+  const [searchParams] = useSearchParams();
+  
+  // Preserve all existing URL parameters
+  const queryString = searchParams.toString();
+  const redirectPath = queryString ? `/results-v5?${queryString}` : '/results-v5';
+  
+  return <Navigate to={redirectPath} replace />;
 }
 
 export default App;

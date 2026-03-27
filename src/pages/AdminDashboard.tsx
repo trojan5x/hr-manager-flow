@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { getAllCertificates, createCertificateRecord, createCertificateDownload, getPaymentAnalytics, type PaymentAnalytics, type DateFilter } from '../services/api';
 import type { CertificateRecord } from '../types';
 import TopBar from '../components/TopBar';
+import { supabase } from '../services/supabaseClient';
 
 const AdminDashboard = () => {
     const [certificates, setCertificates] = useState<CertificateRecord[]>([]);
@@ -13,6 +14,12 @@ const AdminDashboard = () => {
         totalOrders: 0,
         successfulPayments: 0
     });
+
+    // Sidebar State
+    const [sidebarOpen, setSidebarOpen] = useState(false);
+    const [sidebarData, setSidebarData] = useState<any>(null);
+    const [sidebarTitle, setSidebarTitle] = useState('');
+    const [sidebarLoading, setSidebarLoading] = useState(false);
 
     // Date filter state
     const [dateFilter, setDateFilter] = useState<DateFilter>({});
@@ -36,8 +43,110 @@ const AdminDashboard = () => {
     };
 
     const loadPaymentAnalytics = async () => {
+        console.log('🔍 DEBUG: Current dateFilter:', dateFilter);
+        console.log('🔍 DEBUG: dateFilter stringified:', JSON.stringify(dateFilter));
         const analytics = await getPaymentAnalytics(dateFilter);
+        console.log('🔍 DEBUG: Analytics result:', analytics);
         setPaymentAnalytics(analytics);
+    };
+
+    // Fetch detailed data for sidebar
+    const fetchSidebarData = async (type: string) => {
+        setSidebarLoading(true);
+        try {
+            let query;
+            let title = '';
+
+            switch (type) {
+                case 'revenue':
+                    title = 'Revenue Details';
+                    query = supabase
+                        .from('orders')
+                        .select(`
+                            id, amount, currency, created_at, status, razorpay_payment_id,
+                            users!inner(id, name, email, phone_number)
+                        `)
+                        .eq('status', 'paid')
+                        .order('created_at', { ascending: false });
+                    break;
+
+                case 'orders':
+                    title = 'Order Details';
+                    query = supabase
+                        .from('orders')
+                        .select(`
+                            id, amount, currency, created_at, status, razorpay_order_id,
+                            users!inner(id, name, email, phone_number)
+                        `)
+                        .eq('status', 'paid')
+                        .order('created_at', { ascending: false });
+                    break;
+
+                case 'payments':
+                    title = 'Successful Payments';
+                    query = supabase
+                        .from('orders')
+                        .select(`
+                            id, amount, currency, created_at, status, razorpay_payment_id,
+                            users!inner(id, name, email, phone_number)
+                        `)
+                        .eq('status', 'paid')
+                        .order('created_at', { ascending: false });
+                    break;
+
+                case 'assessments':
+                    title = 'Assessment Details';
+                    query = supabase
+                        .from('user_assessments')
+                        .select(`
+                            id, score, created_at, is_complete, is_passed, time_taken,
+                            users!inner(id, name, email, phone_number),
+                            roles!inner(id, role_name)
+                        `)
+                        .order('created_at', { ascending: false })
+                        .limit(100);
+                    break;
+
+                case 'certificates':
+                    title = 'Certificate Details';
+                    query = supabase
+                        .from('user_certificates')
+                        .select(`
+                            id, certificate_id, certificate_name, status, issued_at, created_at,
+                            users!inner(id, name, email, phone_number),
+                            role_certificates!inner(name, short_name)
+                        `)
+                        .order('created_at', { ascending: false })
+                        .limit(100);
+                    break;
+
+                default:
+                    return;
+            }
+
+            // Apply date filters if they exist
+            if (dateFilter?.startDate) {
+                query = query.gte('created_at', dateFilter.startDate);
+            }
+            if (dateFilter?.endDate) {
+                query = query.lte('created_at', dateFilter.endDate);
+            }
+
+            const { data, error } = await query;
+
+            if (error) {
+                console.error('Error fetching sidebar data:', error);
+                return;
+            }
+
+            setSidebarData(data);
+            setSidebarTitle(title);
+            setSidebarOpen(true);
+        } catch (error) {
+            console.error('Exception fetching sidebar data:', error);
+        } finally {
+            setSidebarLoading(false);
+        }
     };
 
     useEffect(() => {
@@ -282,7 +391,10 @@ const AdminDashboard = () => {
                 {/* Payment Analytics Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
                     {/* Total Revenue Card */}
-                    <div className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+                    <div 
+                        className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6 cursor-pointer hover:bg-white/10 transition-colors"
+                        onClick={() => fetchSidebarData('revenue')}
+                    >
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-sm text-gray-400 mb-1">Total Revenue</p>
@@ -297,7 +409,10 @@ const AdminDashboard = () => {
                     </div>
 
                     {/* Average Order Value Card */}
-                    <div className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+                    <div 
+                        className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6 cursor-pointer hover:bg-white/10 transition-colors"
+                        onClick={() => fetchSidebarData('orders')}
+                    >
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-sm text-gray-400 mb-1">Average Order Value</p>
@@ -312,7 +427,10 @@ const AdminDashboard = () => {
                     </div>
 
                     {/* Total Orders Card */}
-                    <div className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+                    <div 
+                        className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6 cursor-pointer hover:bg-white/10 transition-colors"
+                        onClick={() => fetchSidebarData('orders')}
+                    >
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-sm text-gray-400 mb-1">Total Orders</p>
@@ -327,7 +445,10 @@ const AdminDashboard = () => {
                     </div>
 
                     {/* Successful Payments Card */}
-                    <div className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+                    <div 
+                        className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6 cursor-pointer hover:bg-white/10 transition-colors"
+                        onClick={() => fetchSidebarData('payments')}
+                    >
                         <div className="flex items-center justify-between">
                             <div>
                                 <p className="text-sm text-gray-400 mb-1">Successful Payments</p>
@@ -343,7 +464,10 @@ const AdminDashboard = () => {
 
                     {/* Total Assessments Card */}
                     {paymentAnalytics.totalAssessments !== undefined && (
-                        <div className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+                        <div 
+                            className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6 cursor-pointer hover:bg-white/10 transition-colors"
+                            onClick={() => fetchSidebarData('assessments')}
+                        >
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-sm text-gray-400 mb-1">Total Assessments</p>
@@ -360,7 +484,10 @@ const AdminDashboard = () => {
 
                     {/* Total Certificates Card */}
                     {paymentAnalytics.totalCertificates !== undefined && (
-                        <div className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+                        <div 
+                            className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6 cursor-pointer hover:bg-white/10 transition-colors"
+                            onClick={() => fetchSidebarData('certificates')}
+                        >
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-sm text-gray-400 mb-1">Total Certificates</p>
@@ -377,7 +504,10 @@ const AdminDashboard = () => {
 
                     {/* Conversion Rate Card */}
                     {paymentAnalytics.conversionRate !== undefined && (
-                        <div className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6">
+                        <div 
+                            className="bg-white/5 backdrop-blur-sm border border-white/20 rounded-xl p-6 cursor-pointer hover:bg-white/10 transition-colors"
+                            onClick={() => fetchSidebarData('assessments')}
+                        >
                             <div className="flex items-center justify-between">
                                 <div>
                                     <p className="text-sm text-gray-400 mb-1">Conversion Rate</p>
@@ -587,6 +717,194 @@ const AdminDashboard = () => {
                     </div>
                 </div>
             </div>
+
+            {/* Detail Sidebar */}
+            {sidebarOpen && (
+                <div className="fixed inset-0 z-50 flex">
+                    {/* Backdrop */}
+                    <div 
+                        className="fixed inset-0 bg-black/50 backdrop-blur-sm"
+                        onClick={() => setSidebarOpen(false)}
+                    />
+                    
+                    {/* Sidebar */}
+                    <div className="ml-auto w-full max-w-2xl bg-[#021019] border-l border-white/20 flex flex-col h-full">
+                        {/* Header */}
+                        <div className="p-6 border-b border-white/20 flex items-center justify-between">
+                            <h2 className="text-xl font-bold text-white">{sidebarTitle}</h2>
+                            <button
+                                onClick={() => setSidebarOpen(false)}
+                                className="p-2 hover:bg-white/10 rounded-lg transition-colors"
+                            >
+                                <svg className="w-5 h-5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 overflow-y-auto p-6">
+                            {sidebarLoading ? (
+                                <div className="flex items-center justify-center py-12">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#98D048]"></div>
+                                </div>
+                            ) : sidebarData && sidebarData.length > 0 ? (
+                                <div className="space-y-4">
+                                    {sidebarData.map((item: any, index: number) => (
+                                        <div key={index} className="bg-white/5 border border-white/10 rounded-lg p-4">
+                                            {/* Revenue/Orders/Payments Data */}
+                                            {(sidebarTitle.includes('Revenue') || sidebarTitle.includes('Order') || sidebarTitle.includes('Payment')) && (
+                                                <>
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-full bg-[#98D048]/20 flex items-center justify-center">
+                                                                <svg className="w-5 h-5 text-[#98D048]" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-semibold text-white">{item.users?.name || 'Unknown'}</h3>
+                                                                <p className="text-sm text-gray-400">{item.users?.email}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-lg font-bold text-[#98D048]">₹{Number(item.amount).toLocaleString('en-IN')}</p>
+                                                            <p className="text-xs text-gray-500">{item.currency}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                                        <div>
+                                                            <span className="text-gray-400">Phone:</span>
+                                                            <p className="text-white font-mono">{item.users?.phone_number || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Date:</span>
+                                                            <p className="text-white">{new Date(item.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Payment ID:</span>
+                                                            <p className="text-white font-mono text-xs">{item.razorpay_payment_id || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Status:</span>
+                                                            <span className="inline-block px-2 py-1 bg-green-500/20 text-green-400 rounded text-xs font-medium">
+                                                                {item.status}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* Assessment Data */}
+                                            {sidebarTitle.includes('Assessment') && (
+                                                <>
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-full bg-orange-500/20 flex items-center justify-center">
+                                                                <svg className="w-5 h-5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-semibold text-white">{item.users?.name || 'Unknown'}</h3>
+                                                                <p className="text-sm text-gray-400">{item.users?.email}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-lg font-bold text-orange-400">{item.score}%</p>
+                                                            <p className="text-xs text-gray-500">{item.is_passed ? 'Passed' : 'Failed'}</p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-2 gap-4 text-sm">
+                                                        <div>
+                                                            <span className="text-gray-400">Role:</span>
+                                                            <p className="text-white">{item.roles?.role_name || 'N/A'}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Time Taken:</span>
+                                                            <p className="text-white">{item.time_taken || 0} mins</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Date:</span>
+                                                            <p className="text-white">{new Date(item.created_at).toLocaleDateString('en-IN')}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Complete:</span>
+                                                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                                                                item.is_complete 
+                                                                    ? 'bg-green-500/20 text-green-400' 
+                                                                    : 'bg-yellow-500/20 text-yellow-400'
+                                                            }`}>
+                                                                {item.is_complete ? 'Yes' : 'No'}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+
+                                            {/* Certificate Data */}
+                                            {sidebarTitle.includes('Certificate') && (
+                                                <>
+                                                    <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex items-center gap-3">
+                                                            <div className="w-10 h-10 rounded-full bg-indigo-500/20 flex items-center justify-center">
+                                                                <svg className="w-5 h-5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4M7.835 4.697a3.42 3.42 0 001.946-.806 3.42 3.42 0 014.438 0 3.42 3.42 0 001.946.806 3.42 3.42 0 013.138 3.138 3.42 3.42 0 00.806 1.946 3.42 3.42 0 010 4.438 3.42 3.42 0 00-.806 1.946 3.42 3.42 0 01-3.138 3.138 3.42 3.42 0 00-1.946.806 3.42 3.42 0 01-4.438 0 3.42 3.42 0 00-1.946-.806 3.42 3.42 0 01-3.138-3.138 3.42 3.42 0 00-.806-1.946 3.42 3.42 0 010-4.438 3.42 3.42 0 00.806-1.946 3.42 3.42 0 013.138-3.138z" />
+                                                                </svg>
+                                                            </div>
+                                                            <div>
+                                                                <h3 className="font-semibold text-white">{item.users?.name || 'Unknown'}</h3>
+                                                                <p className="text-sm text-gray-400">{item.users?.email}</p>
+                                                            </div>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="text-sm font-bold text-indigo-400">{item.role_certificates?.short_name}</p>
+                                                            <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${
+                                                                item.status === 'generated' 
+                                                                    ? 'bg-green-500/20 text-green-400' 
+                                                                    : 'bg-yellow-500/20 text-yellow-400'
+                                                            }`}>
+                                                                {item.status}
+                                                            </span>
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 gap-2 text-sm">
+                                                        <div>
+                                                            <span className="text-gray-400">Certificate:</span>
+                                                            <p className="text-white">{item.role_certificates?.name || item.certificate_name}</p>
+                                                        </div>
+                                                        <div>
+                                                            <span className="text-gray-400">Certificate ID:</span>
+                                                            <p className="text-white font-mono text-xs">{item.certificate_id}</p>
+                                                        </div>
+                                                        <div className="grid grid-cols-2 gap-4">
+                                                            <div>
+                                                                <span className="text-gray-400">Issued:</span>
+                                                                <p className="text-white">{item.issued_at ? new Date(item.issued_at).toLocaleDateString('en-IN') : 'N/A'}</p>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-gray-400">Created:</span>
+                                                                <p className="text-white">{new Date(item.created_at).toLocaleDateString('en-IN')}</p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12">
+                                    <svg className="w-12 h-12 text-gray-400 mx-auto mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 009.586 13H7" />
+                                    </svg>
+                                    <p className="text-gray-400">No data available</p>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 };
